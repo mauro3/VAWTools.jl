@@ -2,7 +2,7 @@ module VAWTools
 
 # General tools, maybe applicable more widely.
 export read_agr, write_agr, read_xyn, inpoly, AGridded, Gridded, Gridded1d, Traj, map_onto_bands, smooth_vector,
-    downsample, split_traj!
+    downsample, split_traj!, boxcar, boxcar_matrix, bin_grid, piecewiselinear, split_poly
 
 
 import Base: ==, size, length, step, +, -, *
@@ -844,13 +844,13 @@ Input:
 Output
 - the value of the field on the bands
 """
-function map_onto_bands(bandi, field::Matrix, fn=mean)
+function map_onto_bands(bandi, field::Matrix, fn=mean, fill=NaN)
     resT = typeof(fn(field[bandi[1]])) # to get result type
     out = zeros(resT, length(bandi))
     for i in 1:length(bandi)
         # drop any with fill values
-        if any(field[bandi[i]].==FILL)
-            out[i] = FILL
+        if any(isequal(field[bandi[i]],fill))
+            out[i] = fill
         else
             out[i] = fn(field[bandi[i]])
         end
@@ -913,7 +913,7 @@ function stdnan(a)
 end
 
 
-"Mean ignoring FILL"
+"Mean ignoring fill"
 function meanfill(a,fill)
     n = 0
     cum = zero(eltype(a))
@@ -924,8 +924,8 @@ function meanfill(a,fill)
         end
     end
     if n==0
-        println("Could not fill a gap! Returning FILL.")
-        return FILL
+        println("Could not fill a gap! Returning fill.")
+        return fill
     end
     cum/n # == NaN if n==0
 end
@@ -1122,7 +1122,8 @@ end
 ###########
 # Smoothing splines
 ###########
-import SmoothingSplines
+import StatsBase, SmoothingSplines
+const SSp = SmoothingSplines
 
 """
 
@@ -1140,9 +1141,9 @@ function smooth_vector{T}(x, y::AbstractVector{T}, len, out=y)
         lambda0 = 0.001 # by trial and error
         lambda = convert(T, lambda0 * len^3) # the ^3 seems correct (trial and error)
         if out==y
-            return SmoothingSplines.predict(fit(SmoothingSpline, convert(Vector{T}, x), y, lambda))
+            return SSp.predict(StatsBase.fit(SSp.SmoothingSpline, convert(Vector{T}, x), y, lambda))
         else
-            return SmoothingSplines.predict(fit(SmoothingSpline, convert(Vector{T}, x), y, lambda), out)
+            return SSp.predict(StatsBase.fit(SSp.SmoothingSpline, convert(Vector{T}, x), y, lambda), out)
         end
     end
 end
