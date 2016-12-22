@@ -1,8 +1,14 @@
 using VAWTools
 using Base.Test
+using SHA
 
-# MD5 sum of a file
-md5sum(fn) = split(readstring(`md5sum $fn`))[1]
+function sha(fn)
+    open(fn) do f
+        sha2_256(f)
+    end
+end
+
+
 
 ## tools.jl tests
 #################
@@ -42,7 +48,7 @@ g2 = VAWTools._read_agr(tfn1, Float64)
 @test g1==g2
 tfn2 = tempfn(".agr")
 write_agr(g2, tfn2)
-@test md5sum(tfn1)==md5sum(tfn2)
+@test sha(tfn1)==sha(tfn2)
 
 # write and read back binary:
 tfn3 = tempfn(".bin")
@@ -50,7 +56,7 @@ write_agr(g1, tfn3)
 g2 = VAWTools._read_agr(tfn3)
 g1_ = VAWTools._read_agr("testfiles/wiki.agr", Float32)
 @test g1_==g2
-@test md5sum(tfn3)==md5sum("testfiles/wiki.bin")
+@test sha(tfn3)==sha("testfiles/wiki.bin")
 
 # larger file:
 g3 = VAWTools._read_agr("testfiles/t2.bin", Float32)
@@ -61,13 +67,9 @@ g3 = VAWTools._read_agr("testfiles/t2.bin", Float32)
 @test g3.dx==25.0f0
 @test g3.NA==-9999.0f0
 
-# larger file:
-# @test_throws ErrorException VAWTools._read_agr("testfiles/t2.bin", Float64)
-
-
 tfn4 = tempfn(".bin")
 write_agr(g3, tfn4)
-@test md5sum("testfiles/t2.bin")==md5sum(tfn4)
+@test sha("testfiles/t2.bin")==sha(tfn4)
 
 # Gridded
 gg = Gridded(g1)
