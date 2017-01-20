@@ -87,7 +87,7 @@ gg = Gridded(g1)
 
 # RasterIO geotiff
 gt,proj4 = VAWTools.read_rasterio("testfiles/small_world.tif")
-@test proj4=="+proj=longlat +datum=WGS84 +no_defs"
+@test proj4=="+proj=longlat +datum=WGS84 +no_defs" || proj4==""
 @test gt.x==-179.55:0.9:179.55
 @test gt.y==-89.55:0.9:89.55
 @test isa(gt.v, Array{Float32,2})

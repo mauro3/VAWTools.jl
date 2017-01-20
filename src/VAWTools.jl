@@ -648,7 +648,11 @@ function read_rasterio(fn::AbstractString, T=Float32; NA=convert(T,NaN))
     nr = ra.height
     nc = ra.width
     #proj = RasterIO.getprojection(ra.dataset)
-    proj4 = strip(readstring(`gdalsrsinfo -o proj4 $fn`), ['\n', ''', ' '])
+    proj4 = try # some computers may not have gdalsrsinfo installed
+        strip(readstring(`gdalsrsinfo -o proj4 $fn`), ['\n', ''', ' '])
+    catch
+        ""
+    end
     va = convert(Matrix{T}, RasterIO.fetch(ra,1))
     # get the NoData value
     aa = Cint[0]
