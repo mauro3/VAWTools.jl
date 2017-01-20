@@ -50,9 +50,18 @@ tfn2 = tempfn(".agr")
 write_agr(g2, tfn2)
 @test sha(tfn1)==sha(tfn2)
 
+## RasterIO agr reading
+g1 = VAWTools.read_agr("testfiles/wiki.agr")
+g2,proj4 = VAWTools.read_rasterio("testfiles/wiki.agr")
+@test isequal(g1.v,g2.v)
+@test g1.x==g2.x
+@test g1.y==g2.y
+@test g1.midpoint==g2.midpoint
+@test proj4==""
+
 # write and read back binary:
 tfn3 = tempfn(".bin")
-write_agr(g1, tfn3)
+write_agr(g1, tfn3, NA_agr=-9999.0)
 g2 = VAWTools._read_agr(tfn3)
 g1_ = VAWTools._read_agr("testfiles/wiki.agr", Float32)
 @test g1_==g2
@@ -72,8 +81,16 @@ write_agr(g3, tfn4)
 @test sha("testfiles/t2.bin")==sha(tfn4)
 
 # Gridded
+g1 = VAWTools._read_agr("testfiles/wiki.agr")
 gg = Gridded(g1)
-@test VAWTools.AGR(gg, NA_agr=-9999)==g1
+@test isequal(VAWTools.AGR(gg, NA_agr=-9999).v, g1.v)
+
+# RasterIO geotiff
+gt,proj4 = VAWTools.read_rasterio("testfiles/small_world.tif")
+@test proj4=="+proj=longlat +datum=WGS84 +no_defs"
+@test gt.x==-179.55:0.9:179.55
+@test gt.y==-89.55:0.9:89.55
+@test isa(gt.v, Array{Float32,2})
 
 # Trajectory
 @test_throws AssertionError Traj(1:5, 6:11, 0.0:5.0)
@@ -374,3 +391,14 @@ f = VAWTools.piecewiselinear([0, 1, 2], [-1, 1, -2])
 @test f(1)==1
 @test f(1.5)==-0.5
 @test f(2)==-2
+
+
+#####
+# projections
+####
+import Proj4
+wgs84 = Proj4.Projection("+proj=longlat +datum=WGS84 +no_defs")
+utm56 = Proj4.Projection("+proj=utm +zone=56 +south +datum=WGS84 +units=m +no_defs")
+
+pt  = [150.0 -27 110]
+@test isapprox(VAWTools.transform_proj(VAWTools.transform_proj(pt, wgs84, utm56), utm56, wgs84), pt)

@@ -14,5 +14,5 @@ julia> Pkg.clone("git@github.com:mauro3/VAWTools.jl.git")
 ```
 
 TODO:
-
+- [ ] provide documentation
 - [ ] more tests & enable coverage

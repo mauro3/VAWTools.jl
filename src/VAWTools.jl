@@ -635,6 +635,45 @@ function split_poly{T}(bigpoly::Matrix{T}, splits)
 end
 
 
+import RasterIO, Proj4
+"""
+    read_rasterio(fn::AbstractString, T=Float32; NA=convert(T,NaN))
+
+Read various raster formats via the RasterIO.jl package.  Put output
+into a Gridded instance and the Proj4 projection string.
+
+"""
+function read_rasterio(fn::AbstractString, T=Float32; NA=convert(T,NaN))
+    ra = RasterIO.openraster(fn)
+    nr = ra.height
+    nc = ra.width
+    #proj = RasterIO.getprojection(ra.dataset)
+    proj4 = strip(readstring(`gdalsrsinfo -o proj4 $fn`), ['\n', ''', ' '])
+    va = convert(Matrix{T}, RasterIO.fetch(ra,1))
+    # get the NoData value
+    aa = Cint[0]
+    nodata, success = RasterIO.getrasternodatavalue(RasterIO.getrasterband(ra.dataset,1))
+    if success
+        for i in eachindex(va)
+            if va[i]==nodata
+                va[i] = NA
+            end
+        end
+    end
+    gt = RasterIO.geotransform(ra)
+    origin = gt[[1,4]]
+    xll,yll = RasterIO.applygeotransform(gt, 0.0, Float64(ra.height))
+    pixelsz = gt[[2,6]]
+    dx = pixelsz[1]
+    dy = -pixelsz[2]
+    @assert gt[[3,5]]==[0,0] "Can only handle North-up images"
+    #Gridded(VAWTools.AGR(va', nc, nr, xll, yll, dx, nodata)), proj
+    Gridded(range(xll+dx/2, dx, nc),
+            range(yll+dy/2, dy, nr),
+            true, flipdim(va,2)), proj4
+end
+
+
 ## Misc helpers
 ###############
 # """
@@ -642,6 +681,43 @@ end
 # """
 #function cut_array(ar, )
 
+# Does not work.  Probably better call out to gdalsrsinfo, see above.
+# """
+# Convert Well-Know-Text to Proj4.  Only works if there is a ESRI or
+# ESPG number embedded in the WKT.
+# """
+# function wkt2proj4(wkt)
+#     auth = search(wkt, "AUTHORITY")
+#     if length(auth)==0
+#         error("No AUTHORITY entry found in well-known-text")
+#     end
+#     endpos = search(wkt[auth[end]+1:end], "]")[1]
+#   @show  li = eval(parse(wkt[auth[end]+1:auth[end]+endpos]))
+#     nr = parse(Int, li[2])
+#     if li[1]=="EPSG"
+#         return Proj4.epsg[nr]
+#     elseif li[1]=="EPSG"
+#         return Proj4.esri[nr]
+#     else
+#         error("AUTHORITY entry mal-formed: $li")
+#     end
+# end
+
+"""
+    transform_proj(xyz, from, to)
+
+Transform between projections.  Uses Proj4.jl
+
+Input `from` and `to` are either strings for Proj4.Projections.
+"""
+function transform_proj(xyz, from, to)
+    from = Proj4.Projection(from)
+    to = Proj4.Projection(to)
+    transform_proj(xyz, from, to)
+end
+function transform_proj(xyz, from::Proj4.Projection, to::Proj4.Projection)
+    Proj4.transform(from, to, xyz)
+end
 
 """
 Convert int to string and pad with 0 to get to len
