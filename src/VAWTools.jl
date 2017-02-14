@@ -1,8 +1,11 @@
 module VAWTools
 
+include("other-pks-fixes.jl")
+
 # General tools, maybe applicable more widely.
 export read_agr, write_agr, read_xyn, inpoly, AGridded, Gridded, Gridded1d, Traj, map_onto_bands, smooth_vector,
-    downsample, split_traj!, boxcar, boxcar_matrix, bin_grid, piecewiselinear, split_poly
+    downsample, split_traj!, boxcar, boxcar_matrix, bin_grid, piecewiselinear, split_poly,
+    transform_proj
 
 
 import Base: ==, size, length, step, +, -, *
@@ -93,13 +96,13 @@ end
 
 
 """
-Holds 1D fields.  Here mostly for holding elevation band data.
+Holds 1D fields, e.g. elevation band data.
 
 Be sure to be clear whether x corresponds to cell centers or boundaries.
 """
 immutable Gridded1d{T} <:  AGridded{T}
     x::FloatRange{Float64}
-    midpoint::Bool  # if true, the (x,y) is cell midpoint, otherwise lower-left corner
+    midpoint::Bool  # if true, the x is cell midpoint, otherwise the lower bound
     v::Vector{T} # values
     err::Vector{T}  # error of values
     function Gridded1d(x,mp,v,err)
@@ -599,9 +602,14 @@ function read_xyn(fn; hasz=false, fix=false)
 end
 
 """
-
 Concatenates a split poly, as returned from read_xyn, into one. Also
 returns indices where to split apart again.
+
+    concat_poly(mpoly::Vector)
+
+Return:
+
+
 
 """
 function concat_poly(mpoly::Vector)
@@ -708,11 +716,13 @@ end
 # end
 
 """
-    transform_proj(xyz, from, to)
+    transform_proj(xy or xyz, from, to)
 
 Transform between projections.  Uses Proj4.jl
 
-Input `from` and `to` are either strings for Proj4.Projections.
+Input:
+- xy or xyz vector, matrix or trajectory of input points (x,y) or (x,y,z)
+- `from` and `to` are either strings for Proj4.Projections (more preformant).
 """
 function transform_proj(xyz, from, to)
     from = Proj4.Projection(from)
@@ -722,6 +732,15 @@ end
 function transform_proj(xyz, from::Proj4.Projection, to::Proj4.Projection)
     Proj4.transform(from, to, xyz)
 end
+function transform_proj(tr::Traj, from, to)
+    xy = transform_proj(hcat(tr.x, tr.y), from, to) # TODO: avoid temporary
+    if haserror(tr)
+        Traj(xy[:,1], xy[:,2], tr.v, tr.err, tr.splits)
+    else
+        Traj(xy[:,1], xy[:,2], tr.v, tr.splits)
+    end
+end
+
 
 """
 Convert int to string and pad with 0 to get to len
@@ -729,6 +748,7 @@ Convert int to string and pad with 0 to get to len
 int2str(i, len) = @sprintf "%05d" i
 
 """
+    windnr(p, poly::Matrix)
 
 Determines the winding number of a point and a polygon, i.e. how many
 times a polygon winds around the point.

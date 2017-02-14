@@ -52,6 +52,7 @@ write_agr(g2, tfn2)
 
 ## RasterIO agr reading
 g1 = VAWTools.read_agr("testfiles/wiki.agr")
+println("Expected output: ERROR 1: ERROR - failed to load SRS ...")
 g2,proj4 = VAWTools.read_rasterio("testfiles/wiki.agr")
 @test isequal(g1.v,g2.v)
 @test g1.x==g2.x
