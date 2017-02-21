@@ -180,55 +180,59 @@ delfls()
 poc = VAWTools.concat_poly(po)
 @test !inpoly([0.0,0], poc[1])
 
-poly = Float64[0 0
-               0 1
-               1 1
-               1 0
-               0 0]'
+# counterclockwise poly
+poly = Float64[0  0  1  1  0
+               0  1  1  0  0]
+# plot with:
+# using Plots; plot(poly[1,:], poly[2,:])
+
 p1 = [0.5, 0.5]
 p2 = [0.5, 0.99]
-p22 = [0.5, 1] # on edge
-p23 = [0.5, 0] # on edge
+p22 = [0.5, 1] # on top edge (per def outside)
+p22_ = [1, 0.5] # on right edge (per def outside)
+p23 = [0.5, 0] # on bottom edge (per def inside)
+p23_ = [0, 0.5] # on left edge (per def inside)
 p24 = [0, 0]   # on corner
 p25 = [0, .4]   # on edge
 p3 = [0.5, 1.1]
 
 @test inpoly(p1, poly)
 @test inpoly(p2, poly)
-@test inpoly(p22, poly)
+@test !inpoly(p22, poly)
+@test !inpoly(p22_, poly)
 @test inpoly(p23, poly)
+@test inpoly(p23_, poly)
 @test inpoly(p24, poly)
 @test inpoly(p25, poly)
 @test !inpoly(p3, poly)
 
 # clockwise poly
-poly = Float64[0 0
-               1 0
-               1 1
-               0 1
-               0 0]'
+poly = Float64[0  1  1  0  0
+               0  0  1  1  0]
 
 @test inpoly(p1, poly)
 @test inpoly(p2, poly)
-@test inpoly(p22, poly)
+@test !inpoly(p22, poly)
+@test !inpoly(p22_, poly)
 @test inpoly(p23, poly)
+@test inpoly(p23_, poly)
 @test inpoly(p24, poly)
 @test inpoly(p25, poly)
 @test !inpoly(p3, poly)
 
 
 # cross-over poly
-poly = Float64[0 0
-               1 0
-               0 1
-               1 1
-               0 0]'
+poly = Float64[ 0  1  0  1  0
+                0  0  1  1  0]
+
 if VERSION>=v"0.5-"
     eval(:(@test_broken inpoly(p1, poly) )) # should be true
 end
 @test inpoly(p2, poly)
-@test inpoly(p22, poly)
+@test !inpoly(p22, poly)
+@test !inpoly(p22_, poly)
 @test inpoly(p23, poly)
+@test !inpoly(p23_, poly)
 @test inpoly(p24, poly)
 @test !inpoly(p25, poly) # different
 @test !inpoly(p3, poly)
@@ -328,6 +332,18 @@ poly = Float64[0 0
 @test inpoly([0.5,0.4], poly)
 @test inpoly([0.5,0.2], poly)
 @test !inpoly([0.7,0.5], poly)
+
+# Test points which are on same y-level as a endpoint of poly edge
+poly = Float64[0.1 1 2 1  0.1
+               0.1 -1 0 1 0.1];
+@test inpoly([1,0.0], poly)
+@test inpoly([1,-0.0001], poly)
+@test inpoly([1,0.0001], poly)
+poly = Float64[0.0 1 2 1  0.0
+               0.0 -1 0 1 0.0];
+@test inpoly([1,0.0], poly)
+@test inpoly([1,-0.0001], poly)
+@test inpoly([1,0.0001], poly)
 
 
 #####

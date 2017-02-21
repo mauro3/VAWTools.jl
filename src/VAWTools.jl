@@ -608,7 +608,7 @@ returns indices where to split apart again.
     concat_poly(mpoly::Vector)
 
 Return:
-
+- bigpoly -- with size==(2,n)
 
 
 """
@@ -764,23 +764,35 @@ function windnr(p, poly::Matrix)
     wn = 0 # winding number, inside if odd
     len = length(poly)-2
     @inbounds for k=1:2:len #size(poly,2)-1 # @fastmath makes it worse
-        # ex1,ey1,ex2,ey2 = poly[k:k+3] # is slow...
+        # Coordinates of edge endpoints
         ex1,ey1,ex2,ey2 = poly[k], poly[k+1], poly[k+2], poly[k+3]
-        # Reject edge if p totally above or below p:
-        if (ey1>py && ey2>py) || (ey1<py && ey2<py)
-            continue
-        end
+
         # Check edges intersecting a horizontal ray:
+        # rules http://geomalgorithms.com/a03-_inclusion.html#Edge-Crossing-Rules
         orient = leftorright(px,py,ex1,ey1,ex2,ey2)
         if up(ey1,ey2)
-            if orient==-1; wn-=1 end # p strictly left of e
+            # an upward edge includes its starting endpoint, and
+            # excludes its final endpoint;
+            !(py>=ey1 && py<ey2) && continue
+            if orient==-1; wn-=1 end # p strictly left of oriented e
         elseif down(ey1,ey2)
-            if orient==1;  wn+=1 end # p strictly right of e
+            # a downward edge excludes its starting endpoint, and
+            # includes its final endpoint;
+            !(py<ey1 && py>=ey2) && continue
+            if orient==1; wn+=1 end # p strictly right of oriented e
+        else # Horizontal edges are excluded.
+            continue
         end
+        # NOTE: Rule "the edge-ray intersection point must be strictly
+        # right of the point P."  implies that points on a right-side
+        # boundary edge being outside, and ones on a left-side edge
+        # being inside.
     end
     return wn
 end
+# edge goes up
 up(ey1,ey2)   = ey1<ey2
+# edge goes down
 down(ey1,ey2) = ey1>ey2
 function leftorright(px,py,ex1,ey1,ex2,ey2)
     # returns:
@@ -802,6 +814,9 @@ Determines if a point is inside a polygon.
 
 Returns true if point has an odd winding number.  This should label
 points as exterior which are inside outcrops.  See test for a test.
+
+Note that points located on a right-side boundary edge are outside,
+and ones on a left-side edge are inside.
 """
 inpoly(p, poly::Matrix) = isodd(windnr(p,poly))
 
