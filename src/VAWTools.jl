@@ -769,6 +769,8 @@ times a polygon winds around the point.
 It follows Dan Sunday: http://geomalgorithms.com/a03-_inclusion.html.
 """
 function windnr(p, poly::Matrix)
+    @assert size(poly,1)==2
+    @assert size(poly,2)>1
     @assert length(p)==2
     @assert poly[:,1]==poly[:,end]
     # Loop over edges

@@ -184,7 +184,8 @@ delfls()
 @test VAWTools.leftorright(1,0.5, 1,0,1,1)==0
 
 poc = VAWTools.concat_poly(po)
-@test !inpoly([0.0,0], poc[1])
+@test !inpoly([0.0,0], poc[1][1:2,:])
+@test inpoly([6.28793e5, 90129.7+10], poc[1][1:2,:])
 
 # counterclockwise poly
 poly = Float64[0  0  1  1  0
