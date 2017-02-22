@@ -617,11 +617,6 @@ Return:
 """
 function concat_poly(mpoly::Vector)
     T = eltype(mpoly[1])
-    # if length(mpoly)==1
-    #     @assert mpoly[1][:,1]==mpoly[1][:,end] "All input polys need to be closed."
-    #     return copy(mpoly[1]), [1,size(mpoly[1],2)+1]
-    # end
-
     # total size is sum of sizes plus one extra point for all but the
     # first poly.
     totsize = mapreduce(x->size(x,2), +, mpoly) + length(mpoly) -1
@@ -647,7 +642,11 @@ end
 "Split up concatenated polygon."
 function split_poly{T}(bigpoly::Matrix{T}, splits)
     out = Matrix{T}[]
-    push!(out, bigpoly[:,splits[1]:splits[1+1]-1])
+    if length(splits)==0
+        return out
+    else
+        push!(out, bigpoly[:,splits[1]:splits[1+1]-1])
+    end
     for i=2:length(splits)-1
         # remove the extra point joining to the first poly
         push!(out, bigpoly[:,splits[i]:splits[i+1]-2])
