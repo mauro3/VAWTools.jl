@@ -602,42 +602,55 @@ function read_xyn(fn; hasz=false, fix=false)
 end
 
 """
-Concatenates a split poly, as returned from read_xyn, into one. Also
-returns indices where to split apart again.
-
     concat_poly(mpoly::Vector)
+
+Concatenates a split poly, as returned from read_xyn, into one. Also
+returns indices where to split apart again.  The concatenated polygon
+is fully connected, with an edge going back to the first point.  This
+allows to use `inpoly`, at least if the inner polygons have different
+orientation to the outer. Also note that the input and output polygons
+are closed, i.e. last point == first point.
 
 Return:
 - bigpoly -- with size==(2,n)
-
-
+- splits -- ith poly has indices splits[i]:splits[i+1]-1
 """
 function concat_poly(mpoly::Vector)
     T = eltype(mpoly[1])
-    if length(mpoly)==1
-        return mpoly[1], [1,length(mpoly[1])]
-    end
-    totsize = mapreduce(x->size(x,2), +, mpoly) + length(mpoly)
+    # if length(mpoly)==1
+    #     @assert mpoly[1][:,1]==mpoly[1][:,end] "All input polys need to be closed."
+    #     return copy(mpoly[1]), [1,size(mpoly[1],2)+1]
+    # end
+
+    # total size is sum of sizes plus one extra point for all but the
+    # first poly.
+    totsize = mapreduce(x->size(x,2), +, mpoly) + length(mpoly) -1
     bigpoly = Array(T,size(mpoly[1],1),totsize)
-    splits = Int[1]
+    splits = Int[]
     is = 1
     for i=1:length(mpoly)
+        push!(splits, is)
+        @assert mpoly[i][:,1]==mpoly[i][:,end] "All input polys need to be closed."
         bigpoly[:,is:is+size(mpoly[i],2)-1] = mpoly[i]
-        if i<=length(mpoly)
-            is = is+size(mpoly[i],2)+1
-            push!(splits, is-1)
+        if i==1
+            is = is+size(mpoly[i],2)
+        else
+            # add extra point to connect back to mpoly[1][:,1]
+            is = is+size(mpoly[i],2) + 1
             bigpoly[:,is-1] = mpoly[1][:,1]
         end
     end
-    push!(splits, size(bigpoly,2))
+    push!(splits, totsize+1)
     return bigpoly, splits
 end
 
 "Split up concatenated polygon."
 function split_poly{T}(bigpoly::Matrix{T}, splits)
     out = Matrix{T}[]
-    for i=1:length(splits)-1
-        push!(out, bigpoly[:,splits[i]+1:splits[i+1]-1])
+    push!(out, bigpoly[:,splits[1]:splits[1+1]-1])
+    for i=2:length(splits)-1
+        # remove the extra point joining to the first poly
+        push!(out, bigpoly[:,splits[i]:splits[i+1]-2])
     end
     out
 end

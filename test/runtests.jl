@@ -159,6 +159,10 @@ VAWTools.split_traj!(tr,2)
 po = read_xyn("testfiles/poly.xyn")
 @test length(po)==1
 @test size(po[1])==(2,24)
+cpo = VAWTools.concat_poly(po)
+@test po[1]==cpo[1]
+@test po==VAWTools.split_poly(cpo...)
+
 
 po = read_xyn("testfiles/multipoly.xyzn", hasz=true)
 @test length(po)==4
@@ -166,6 +170,8 @@ po = read_xyn("testfiles/multipoly.xyzn", hasz=true)
 @test size(po[2])==(3,5)
 @test size(po[3])==(3,4)
 @test size(po[4])==(3,3)
+cpo = VAWTools.concat_poly(po)
+@test po==VAWTools.split_poly(cpo...)
 
 
 # tidy up temp-files
