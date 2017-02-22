@@ -1076,7 +1076,7 @@ function mean_weighted(a,w)
 end
 
 """
-boxcar(A::AbstractArray, window[, weights])
+    boxcar(A::AbstractArray, window[, weights])
 
 Boxcar filter.  The two argument call ignores NaNs.  The three
 argument call uses weights instead of NaNs, it can be a lot faster.
@@ -1134,12 +1134,16 @@ function boxcar(A::AbstractArray, window, weights::AbstractMatrix)
 end
 
 """
-This produces a sparse matrix which can be used to apply the filter: bx*hs2d
+    boxcar_matrix(T::DataType, window::Integer, weights::AbstractMatrix)
 
+This produces a sparse matrix which can be used to apply the filter:
+`bx*hs2d`. Expensive to do create but very fast to apply, thus use
+when needing the same filter several times.
 """
-function boxcar_matrix(T::DataType, window::Integer, weights::AbstractMatrix)
+function boxcar_matrix{T}(::Type{T}, window::Integer, weights::AbstractMatrix)
     # make an accumulator type closed under addition & division
     # (needed for Ints and Bools):
+    Tacc = promote_type(T, eltype(weights))
     nr = size(weights,1)
     nc = size(weights,2)
     is = Int[]
@@ -1150,15 +1154,14 @@ function boxcar_matrix(T::DataType, window::Integer, weights::AbstractMatrix)
     sizehint!(vs, 2*window*nr*nc)
     R = CartesianRange(size(weights))
     I1, Iend = first(R), last(R)
-    #    @inbounds @fastmath for I in R
-    for I in R
+    @inbounds @fastmath for I in R
         if weights[I]==0
             # do nothing
             continue
         end
         i = (I.I[2]-1)*nr + I.I[1] # row of output matrix
         nrows = 0 # number of contributing cells
-        acc = zero(T) # sum of all weights for one cell
+        acc = zero(Tacc) # sum of all weights for one cell
         for J in CartesianRange(max(I1, I-I1*window), min(Iend, I+I1*window))
             if weights[J]==0
                 continue
@@ -1171,8 +1174,9 @@ function boxcar_matrix(T::DataType, window::Integer, weights::AbstractMatrix)
             acc += weights[J]
         end
         # divide the current batch by the summed weights:
-        for n=0:nrows-1
-            vs[length(vs)-n] /= acc
+        lvs = length(vs)
+        for n=lvs-(0:nrows-1)
+            vs[n] /= acc
         end
     end
     return sparse(is, js, vs, length(weights), length(weights))
