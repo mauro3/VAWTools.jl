@@ -3,9 +3,8 @@
 import RasterIO
 
 # https://github.com/wkearn/RasterIO.jl/pull/26
-eval(RasterIO, :(
-    function getrasternodatavalue(rasterband::GDALRasterBandH)
+function getrasternodatavalue(rasterband::RasterIO.GDALRasterBandH)
     success = Cint[0]
-    nodata = _getrasternodatavalue(rasterband, pointer(success))
+    nodata = RasterIO._getrasternodatavalue(rasterband, pointer(success))
     nodata, Bool(success[])
-    end))
+end

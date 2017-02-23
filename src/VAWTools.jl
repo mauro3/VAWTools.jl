@@ -1,3 +1,5 @@
+__precompile__()
+
 module VAWTools
 
 include("other-pks-fixes.jl")
@@ -676,7 +678,7 @@ function read_rasterio(fn::AbstractString, T=Float32; NA=convert(T,NaN))
     va = convert(Matrix{T}, RasterIO.fetch(ra,1))
     # get the NoData value
     aa = Cint[0]
-    nodata, success = RasterIO.getrasternodatavalue(RasterIO.getrasterband(ra.dataset,1))
+    nodata, success = getrasternodatavalue(RasterIO.getrasterband(ra.dataset,1))
     if success
         for i in eachindex(va)
             if va[i]==nodata
@@ -925,6 +927,7 @@ end
 end
 
 
+import Interpolations
 """
 Bins a trajectory using a grid
 
@@ -939,8 +942,8 @@ KW:
 function bin_traj(tr::Traj, g::Gridded, binsize_or_bins, mask=trues(size(g.v)); binround=-floor(Int, log10(binsize_or_bins)))
     @assert size(mask)==size(g.v)
 
-    demi  = interpolate((g.x, g.y), g.v, Interpolations.Gridded(Linear()) )
-    maski  = interpolate((g.x, g.y), mask, Interpolations.Gridded(Constant()) ) # returns Int!
+    demi  = Interpolations.interpolate((g.x, g.y), g.v, Interpolations.Gridded(Interpolations.Linear()) )
+    maski  = Interpolations.interpolate((g.x, g.y), mask, Interpolations.Gridded(Interpolations.Constant()) ) # returns Int!
 
     v = [demi[x,y] for (x,y) in zip(tr.x,tr.y)]
     vm = Bool[maski[x,y] for (x,y) in zip(tr.x,tr.y)]
@@ -1141,8 +1144,7 @@ This produces a sparse matrix which can be used to apply the filter:
 when needing the same filter several times.
 """
 function boxcar_matrix{T}(::Type{T}, window::Integer, weights::AbstractMatrix)
-    # make an accumulator type closed under addition & division
-    # (needed for Ints and Bools):
+    # make an accumulator type closed under addition (needed for Ints and Bools):
     Tacc = promote_type(T, eltype(weights))
     nr = size(weights,1)
     nc = size(weights,2)
