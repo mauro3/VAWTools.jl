@@ -5,7 +5,8 @@ module VAWTools
 include("other-pks-fixes.jl")
 
 # General tools, maybe applicable more widely.
-export read_agr, write_agr, read_xyn, inpoly, AGridded, Gridded, Gridded1d, Traj, map_onto_bands, smooth_vector,
+export read_agr, write_agr, read_xyn, inpoly, AGridded, Gridded, Gridded1d, Traj, map_onto_bands, make_1Dglacier,
+    smooth_vector,
     downsample, split_traj!, boxcar, boxcar_matrix, bin_grid, piecewiselinear, split_poly,
     transform_proj
 
@@ -867,131 +868,13 @@ function absslope(g::Gridded)
     return alphas
 end
 
-
 ##############
 # Bands
 ##############
+include("elevation-bands.jl")
 
-"""
-Bins a gird.  Often used to bin a DEM into elevation bands.
-
-- g -- g.v of grid is binned
-- binsize_or_bins -- bin size or the bins (a Range)
-- mask -- specify if not all locations of a gird should be binned.]
-
-KW:
-- binround -- floor the bin-start using this many digits (see help of floor)
-
-Return:
-- bands -- a range of the bands, e.g. 0.0:10.0:100.0
-- inds -- a Vector{Vector{Int}} of length(bands) with each element
-          containing the indices of cells in the band
-"""
-function bin_grid(g::Gridded, binsize_or_bins, mask=BitArray([]); binround=-floor(Int, log10(binsize_or_bins)))
-    if isempty(mask)
-        v = g.v
-        ginds = 1:length(v)
-    else
-        @assert size(mask)==size(g.v)
-        v = g.v[mask]
-        ginds = find(mask[:])
-    end
-    nv = length(v)
-    if isa(binsize_or_bins, Number) # i.e. a binsize
-        mi, ma = minimum(v), maximum(v)
-        binstart = floor(mi, binround)
-        binend = floor(ma, binround)
-        bins = binstart:binsize_or_bins:binend # these are the start of the bins
-    else
-        bins = binsize_or_bins
-    end
-    _bin_grid_kernel(bins, nv, v, ginds)
-end
-@inbounds function _bin_grid_kernel(bins, nv, v, ginds)
-    indices = Vector{Int}[]
-    for b in bins
-        ind = Int[]
-        push!(indices, ind)
-    end
-    for j=1:nv
-        if (bins[2]-bins[1])>0
-            i = searchsortedfirst(bins, v[j])-1
-        else
-            # https://github.com/JuliaLang/julia/issues/18653
-            i = searchsortedfirst(collect(bins), v[j], rev=true)-1
-        end
-        i = max(i,1) # TODO, this is a bit of a hack... otherwise if bins=0:10 and v[j]==0 -> i==0
-        push!(indices[i], ginds[j])
-    end
-    return bins, indices
-end
-
-
-import Interpolations
-"""
-Bins a trajectory using a grid
-
-- tr -- trajectory to be binned
-- g -- g.v of grid used for binning
-- binsize_or_bins -- bin size or the bins (a Range)
-- mask -- specify if not all locations of a gird should be binned.]
-
-KW:
-- binround -- floor the bin-start using this many digits (see help of floor)
-"""
-function bin_traj(tr::Traj, g::Gridded, binsize_or_bins, mask=trues(size(g.v)); binround=-floor(Int, log10(binsize_or_bins)))
-    @assert size(mask)==size(g.v)
-
-    demi  = Interpolations.interpolate((g.x, g.y), g.v, Interpolations.Gridded(Interpolations.Linear()) )
-    maski  = Interpolations.interpolate((g.x, g.y), mask, Interpolations.Gridded(Interpolations.Constant()) ) # returns Int!
-
-    v = [demi[x,y] for (x,y) in zip(tr.x,tr.y)]
-    vm = Bool[maski[x,y] for (x,y) in zip(tr.x,tr.y)]
-    v = v[vm]
-    ginds = find(vm)
-    nv = length(v)
-
-    if isa(binsize_or_bins, Number)
-        mi, ma = minimum(v), maximum(v)
-        binstart = floor(mi, binround)
-        binend = floor(ma, binround)
-        bins = binstart:binsize_or_bins:binend # these are the start of the bins
-    else
-        bins = binsize_or_bins
-    end
-    _bin_grid_kernel(bins, nv, v, ginds)
-end
-
-"""
-   map_onto_bands(bandi, field, fn=mean)
-
-Map a field onto the elevation bands.  The field needs to have the
-same size as the original binned-grid.
-
-Input:
-- bandi -- as returned by bin_grid
-- field -- the field, either a Matrix or a Gridded
-- fn -- the function to do the reduction with.  Default==mean
-
-Output
-- the value of the field on the bands
-"""
-function map_onto_bands(bandi, field::Matrix, fn=mean, fill=NaN)
-    resT = typeof(fn(field[bandi[1]])) # to get result type
-    out = zeros(resT, length(bandi))
-    for i in 1:length(bandi)
-        # drop any with fill values
-        if any(isequal(field[bandi[i]],fill))
-            out[i] = fill
-        else
-            out[i] = fn(field[bandi[i]])
-        end
-    end
-    return out
-end
-map_onto_bands(bandi, field::Gridded, fn=mean) = map_onto_bands(bandi, field.v, fn=mean)
-
-
+#################
+# Filtering
 #################
 
 """
@@ -1083,6 +966,7 @@ end
 
 Boxcar filter.  The two argument call ignores NaNs.  The three
 argument call uses weights instead of NaNs, it can be a lot faster.
+Note that even masked NaNs will poison the result!
 
 For the weights it may be faster to use non Bool arrays or BitArrays,
 say Int8.
