@@ -426,3 +426,32 @@ utm56 = Proj4.Projection("+proj=utm +zone=56 +south +datum=WGS84 +units=m +no_de
 
 pt  = [150.0 -27 110]
 @test isapprox(VAWTools.transform_proj(VAWTools.transform_proj(pt, wgs84, utm56), utm56, wgs84), pt)
+
+
+#########
+# Binning
+#########
+x = -100.3:0.56:-12
+y = 1001:2.3:1100
+ele = x .+ y'
+mask = trues(size(ele))
+mask[1:10,:] = false
+g = Gridded(x,y,ele)
+bands, bandi = bin_grid(g, 10.0, mask)
+@test length(bands)==length(bandi)
+binmat = VAWTools.bins2matrix(g, bands, bandi)
+@test all(binmat[1:10,:].==0)
+
+xx,yy = -50:11:23, 900.0:7:1200
+othergrid = Gridded(xx, yy, rand(length(xx),length(yy)))
+bandii = VAWTools.bandi_for_other_grid(bands, bandi, g, othergrid,
+                              trues(size(g.v)), binmat)
+
+binmatt = VAWTools.bins2matrix(othergrid, bands, bandii)
+@test binmatt == [ 0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  6   7   7   8   9  10  10  11  12  12  13  14  14  15  0  0  0  0  0  0  0  0  0  0  0  0  0  0
+                   0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  7   8   9   9  10  11  11  12  13  13  14  15  15  16  0  0  0  0  0  0  0  0  0  0  0  0  0  0
+                   0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  8   9  10  10  11  12  12  13  14  14  15  16  17  17  0  0  0  0  0  0  0  0  0  0  0  0  0  0
+                   0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  9  10  11  11  12  13  14  14  15  16  16  17  18  18  0  0  0  0  0  0  0  0  0  0  0  0  0  0
+                   0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0   0   0   0   0   0   0   0   0   0   0   0   0   0  0  0  0  0  0  0  0  0  0  0  0  0  0  0
+                   0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0   0   0   0   0   0   0   0   0   0   0   0   0   0  0  0  0  0  0  0  0  0  0  0  0  0  0  0
+                   0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0   0   0   0   0   0   0   0   0   0   0   0   0   0  0  0  0  0  0  0  0  0  0  0  0  0  0  0]

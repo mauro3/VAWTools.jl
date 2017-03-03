@@ -1,4 +1,4 @@
-__precompile__()
+#__precompile__() # RasterIO is not pre-compiled
 
 module VAWTools
 

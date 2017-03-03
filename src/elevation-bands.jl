@@ -145,19 +145,19 @@ function band_slope(alphas, bandnr, alpha_min, alpha_max)
 end
 
 """
-Bins a gird.  Often used to bin a DEM into elevation bands.
+Bins a gird into bands.  Often used to bin a DEM into elevation bands.
 
 - g -- to be binned ::Gridded or ::Matrix
 - binsize_or_bins -- bin size or the bins (a Range)
-- mask -- specify if not all locations of a gird should be binned.]
+- mask -- specify if not all locations of a gird should be binned.
 
 KW:
 - binround -- floor the bin-start using this many digits (see help of floor)
 
 Return:
 - bands -- a range of the bands, e.g. 0.0:10.0:100.0
-- inds -- a Vector{Vector{Int}} of length(bands) with each element
-          containing the indices of cells in the band
+- bandi -- a Vector{Vector{Int}} of length(bands) with each element
+           containing the indices of cells in the band
 """
 bin_grid(g::Gridded, binsize_or_bins, mask=BitArray([]); binround=_binround(binsize_or_bins)) =
     bin_grid(g.v, binsize_or_bins, mask; binround=binround)
@@ -239,7 +239,7 @@ end
 """
    map_onto_bands(bandi, field, fn=mean)
 
-Map a field onto the elevation bands.  The field needs to have the
+Map a field onto the (elevation) bands.  The field needs to have the
 same size as the original binned-grid.
 
 Input:
@@ -264,3 +264,72 @@ function map_onto_bands(bandi, field::Matrix, fn=mean, fill=NaN)
     return out
 end
 map_onto_bands(bandi, field::Gridded, fn=mean) = map_onto_bands(bandi, field.v, fn=mean)
+
+
+"""
+    bins2matrix(g::Union{Gridded,Matrix}, bands, bandi) = bins2matrix(g.v, bands, bandi)
+
+Return a matrix which gives the bin-number of each its (i,j) locations.
+Locations not binned (i.e. masked) are ==0.
+"""
+bins2matrix(g::Gridded, bands, bandi) = bins2matrix(g.v, bands, bandi)
+function bins2matrix(g::Matrix, bands, bandi)
+    out = zeros(Int, size(g))
+    for (n,b) in enumerate(bandi)
+        for i in b
+            out[i] = n
+        end
+    end
+    return out
+end
+
+
+"""
+    bands_of_different_grid(, g::Gridded, mask=trues(size(g.v)) )
+
+Returns vector of indices (bandi) to map a different grid onto bands.
+It only maps points onto bands which are within gb.gl.glaciermask.
+Additionally & optionally, a mask for `g` can also be given.  Returns:
+
+    bandi
+"""
+function bands_of_different_grid_old(bands, bandi, g::Gridded, mask, grid2bin::Gridded, mask2bin=trues(size(g.v)) )
+    warn("bands_of_different_grid may be buggy.  Double check!")
+    if g.x!=g.x || g.y!=g.y
+        itps = Interp.interpolate((g.x, g.y), g.v, Interpolations.Gridded(Interp.Linear()) )
+        itpm = Interp.interpolate((g.x, g.y), mask, Interpolations.Gridded(Interp.Constant()) )
+        gh = itps[g.x, g.y] # surf-ele at G-(x,y)
+        gmask = convert(Matrix{Bool}, itpm[g.x, g.y]) # glacier mask at G-(x,y) https://github.com/tlycken/Interpolations.jl/issues/117
+        demg = deepcopy(g)
+        demg.v[:] = gh
+        bands_, bandi_ = bin_grid(demg, bands, mask2bin & gmask & (minimum(bands).<= demg.v .<= maximum(bands)) )
+    else
+        bandi_ = deepcopy(bandi)
+    end
+    bandi_
+end
+
+function bandi_for_other_grid(bands, bandi, g::Gridded, othergrid::Gridded,
+                              othermask=trues(size(g.v)),
+                              binmat=bins2matrix(g, bands, bandi))
+    og = othergrid
+    if g.x!=og.x || g.y!=og.y
+        bandi_ = [Int[] for i=1:length(bandi)]
+        dims = size(og.v)
+        itpm = Interpolations.interpolate((g.x, g.y), binmat, Interpolations.Gridded(Interpolations.Constant()) );
+        itpm = Interpolations.extrapolate(itpm, 0);
+        for j=1:size(og.v,2)
+            for i=1:size(og.v,1)
+                if othermask[i,j]
+                    ind = itpm[og.x[i], og.y[j]]
+                    if ind>0
+                        push!(bandi_[ind], sub2ind(dims, i, j))
+                    end
+                end
+            end
+        end
+    else
+        bandi_ = deepcopy(bandi)
+    end
+    return bandi_
+end
