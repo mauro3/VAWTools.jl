@@ -444,8 +444,9 @@ binmat = VAWTools.bins2matrix(g, bands, bandi)
 
 xx,yy = -50:11:23, 900.0:7:1200
 othergrid = Gridded(xx, yy, rand(length(xx),length(yy)))
-bandii = VAWTools.bandi_for_other_grid(bands, bandi, g, othergrid,
-                              trues(size(g.v)), binmat)
+bandii = VAWTools.bandi_for_other_grid(bands, binmat, g, othergrid)
+bandii2 = VAWTools.bandi_for_other_grid(bands, bandi, g, othergrid)
+@test bandii==bandii2
 
 binmatt = VAWTools.bins2matrix(othergrid, bands, bandii)
 @test binmatt == [ 0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  6   7   7   8   9  10  10  11  12  12  13  14  14  15  0  0  0  0  0  0  0  0  0  0  0  0  0  0
@@ -455,3 +456,9 @@ binmatt = VAWTools.bins2matrix(othergrid, bands, bandii)
                    0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0   0   0   0   0   0   0   0   0   0   0   0   0   0  0  0  0  0  0  0  0  0  0  0  0  0  0  0
                    0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0   0   0   0   0   0   0   0   0   0   0   0   0   0  0  0  0  0  0  0  0  0  0  0  0  0  0  0
                    0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0   0   0   0   0   0   0   0   0   0   0   0   0   0  0  0  0  0  0  0  0  0  0  0  0  0  0  0]
+
+# 1D glacier
+bands_g, bandi_g, malphas, areas, lengths, widths, x, xmid, dem, alpha2d =
+    make_1Dglacier(g, 10.0, mask)
+@test bands_g==bands
+@test bandi_g==bandi

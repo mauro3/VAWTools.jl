@@ -84,7 +84,7 @@ function make_1Dglacier(dem::Gridded, binsize_or_bins, glaciermask=BitArray([]);
     end
     box_diag = sqrt((dem.x[end]-dem.x[1])^2 + (dem.y[end]-dem.y[1])^2)
     if abs(sum(lengths)-box_diag)/box_diag>0.4
-        warn("Glacier length from might be wrong. Band-length: $(round(Int,sum(lengths)/1e3))km, bounding-box diag: $(round(Int,box_diag/1e3))km")
+        warn("Glacier length from might be wrong. Band-length: $(sum(lengths)/1e3)km, bounding-box diag: $(box_diag/1e3)km")
     end
 
     return bands, bandi, malphas, areas, lengths, widths, x, xmid, dem, alpha2d
@@ -285,36 +285,29 @@ end
 
 
 """
-    bands_of_different_grid(, g::Gridded, mask=trues(size(g.v)) )
+    bandi_for_other_grid(binmat, g::Gridded, othergrid::Gridded, othermask=trues(size(othergrid.v))
+    bandi_for_other_grid(bands, bandi, g::Gridded, othergrid::Gridded,
+                         othermask=trues(size(othergrid.v)))
 
-Returns vector of indices (bandi) to map a different grid onto bands.
-It only maps points onto bands which are within gb.gl.glaciermask.
-Additionally & optionally, a mask for `g` can also be given.  Returns:
+Returns vector of indices (bandi) to map a different grid onto the
+bands encoded in `binmat` (or `bands, bandi`) and grid `g`.  It only
+maps points onto bands which are within the mask applied to generate
+the bands.  Additionally & optionally, a mask for the othergrid can
+also be given.  Return
 
     bandi
 """
-function bands_of_different_grid_old(bands, bandi, g::Gridded, mask, grid2bin::Gridded, mask2bin=trues(size(g.v)) )
-    warn("bands_of_different_grid may be buggy.  Double check!")
-    if g.x!=g.x || g.y!=g.y
-        itps = Interp.interpolate((g.x, g.y), g.v, Interpolations.Gridded(Interp.Linear()) )
-        itpm = Interp.interpolate((g.x, g.y), mask, Interpolations.Gridded(Interp.Constant()) )
-        gh = itps[g.x, g.y] # surf-ele at G-(x,y)
-        gmask = convert(Matrix{Bool}, itpm[g.x, g.y]) # glacier mask at G-(x,y) https://github.com/tlycken/Interpolations.jl/issues/117
-        demg = deepcopy(g)
-        demg.v[:] = gh
-        bands_, bandi_ = bin_grid(demg, bands, mask2bin & gmask & (minimum(bands).<= demg.v .<= maximum(bands)) )
-    else
-        bandi_ = deepcopy(bandi)
-    end
-    bandi_
-end
 
-function bandi_for_other_grid(bands, bandi, g::Gridded, othergrid::Gridded,
-                              othermask=trues(size(g.v)),
-                              binmat=bins2matrix(g, bands, bandi))
+function bandi_for_other_grid(bands, bandi::Vector{Vector{Int}}, g::Gridded, othergrid::Gridded,
+                              othermask=trues(size(othergrid.v)))
+    binmat=bins2matrix(g, bands, bandi)
+    bandi_for_other_grid(bands, binmat, g, othergrid, othermask)
+end
+function bandi_for_other_grid(bands, binmat::Matrix{Int}, g::Gridded, othergrid::Gridded, othermask=trues(size(othergrid.v)) )
     og = othergrid
+    @assert size(othergrid)==size(othermask)
     if g.x!=og.x || g.y!=og.y
-        bandi_ = [Int[] for i=1:length(bandi)]
+        bandi_ = [Int[] for i=1:length(bands)]
         dims = size(og.v)
         itpm = Interpolations.interpolate((g.x, g.y), binmat, Interpolations.Gridded(Interpolations.Constant()) );
         itpm = Interpolations.extrapolate(itpm, 0);
