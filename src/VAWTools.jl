@@ -6,7 +6,7 @@ include("other-pks-fixes.jl")
 
 # General tools, maybe applicable more widely.
 export read_agr, write_agr, read_xyn, inpoly, AGridded, Gridded, Gridded1d, Traj, map_onto_bands, make_1Dglacier,
-    smooth_vector,
+    smooth_vector, absslope, gradient3by3,
     downsample, split_traj!, boxcar, boxcar_matrix, bin_grid, piecewiselinear, split_poly,
     transform_proj
 
@@ -841,6 +841,9 @@ inpoly(p, poly::Matrix) = isodd(windnr(p,poly))
 # https://github.com/helenchg/PolygonClipping.jl/blob/1fc74ab797c6585795283749b7c4cc9cb2000243/src/PolygonClipping.jl#L139
 
 """
+    absslope(g::Gridded)
+    absslope(x::Range,y::Range,v)
+
 Absolute value of slope angle (by finite differences)
 
 - Averaged over 3x3 points.
@@ -856,17 +859,46 @@ Note: slope and angle are very similar up to about ~0.4
 TODO:
 - allow only using points inside a mask
 """
-function absslope(g::Gridded)
-    nx, ny = size(g)
-    dx,v = step(g.x), g.v
+absslope(g::Gridded) = absslope(g.x,g.y,g.v)
+function absslope(x::Range,y::Range,v)
+    nx, ny = length(x),length(y)
+    dx = step(x)
     alphas = zeros(Float64, nx, ny)
     for j=2:ny-1, i=2:nx-1
         dvx = ((v[i+1,j+1]+2*v[i+1,j]+v[i+1,j-1])-(v[i-1,j+1]+2*v[i-1,j]+v[i-1,j-1]))/(8*dx)
-        dvy = ((v[i-1,j-1]+2*v[i,j-1]+v[i+1,j-1])-(v[i-1,j+1]+2*v[i,j+1]+v[i+1,j+1]))/(8*dx)
+        dvy = -((v[i-1,j-1]+2*v[i,j-1]+v[i+1,j-1])-(v[i-1,j+1]+2*v[i,j+1]+v[i+1,j+1]))/(8*dx)
         alphas[i,j] = atan(sqrt(dvx^2+dvy^2))
     end
     return alphas
 end
+
+"""
+    gradient3by3(g::Gridded)
+    gradient3by3(x::Range,y::Range,v)
+
+2D gradient (by finite differences)
+
+- Averaged over 3x3 points.
+- no slope is calculated for the outermost points
+
+In:
+- gridded elevation set or x,y,z
+Out:
+- dvx,dvy
+"""
+gradient3by3(g::Gridded) = gradient3by3(g.x,g.y,g.v)
+function gradient3by3(x::Range,y::Range,v)
+    nx, ny = length(x),length(y)
+    dx = step(x)
+    dvx = zeros(Float64, nx, ny)
+    dvy = zeros(Float64, nx, ny)
+    for j=2:ny-1, i=2:nx-1
+        dvx[i,j] =  ((v[i+1,j+1]+2*v[i+1,j]+v[i+1,j-1]) - (v[i-1,j+1]+2*v[i-1,j]+v[i-1,j-1]))/(8*dx)
+        dvy[i,j] = -((v[i-1,j-1]+2*v[i,j-1]+v[i+1,j-1]) - (v[i-1,j+1]+2*v[i,j+1]+v[i+1,j+1]))/(8*dx)
+    end
+    return dvx, dvy
+end
+
 
 ##############
 # Bands

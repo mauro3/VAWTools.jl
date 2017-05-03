@@ -12,7 +12,8 @@ _binround(binsize_or_bins) = -floor(Int, log10(binsize_or_bins))
                         window_dem_smooth=0.0,
                         window_width_smooth=0.0,
                         alpha_min=deg2rad(0.4),
-                        alpha_max=deg2rad(60.0))
+                        alpha_max=deg2rad(60.0),
+                        FILL=-9999999.0)
 
 Makes a 1D glacier from a 2D DEM by using Huss' elevation band trick.
 
@@ -28,7 +29,8 @@ function make_1Dglacier(dem::Gridded, binsize_or_bins, glaciermask=BitArray([]);
                         window_dem_smooth=0.0,
                         window_width_smooth=0.0,
                         alpha_min=deg2rad(0.4),
-                        alpha_max=deg2rad(60.0))
+                        alpha_max=deg2rad(60.0),
+                        FILL=-9999999.0)
 
 
     # Smooth dem to get smooth alpha, smoother bands.  This is in
@@ -39,14 +41,15 @@ function make_1Dglacier(dem::Gridded, binsize_or_bins, glaciermask=BitArray([]);
         dx = step(dem.x)
         # TODO: should smoothing only happen over glacier?  But then
         # absslope does not work.
-        fillmask = dem.v.!=GV.FILL
+        fillmask = dem.v.!=FILL
         dem.v[:] = boxcar(dem.v, round(Int,window_dem_smooth/dx), fillmask)
-        dem.v[!fillmask] = GV.FILL
+        dem.v[!fillmask] = FILL
     end
     # 2D slopes
     alpha2d = absslope(dem)
 
     bands, bandi = bin_grid(dem, binsize_or_bins, glaciermask, binround=binround)
+    bandsize = step(bands)
 
     nb = length(bands)
     dz = step(bands)
@@ -65,7 +68,7 @@ function make_1Dglacier(dem::Gridded, binsize_or_bins, glaciermask=BitArray([]);
     end
 
     # Smooth the width:
-    # Note, this can make the malphas nosy!
+    # Note, this can make the malphas noisy!
     if window_width_smooth>0
         widths = boxcar(widths, round(Int, window_width_smooth/bandsize) )
         for i=1:nb
@@ -293,7 +296,7 @@ Returns vector of indices (bandi) to map a different grid onto the
 bands encoded in `binmat` (or `bands, bandi`) and grid `g`.  It only
 maps points onto bands which are within the mask applied to generate
 the bands.  Additionally & optionally, a mask for the othergrid can
-also be given.  Return
+also be given.  Return:
 
     bandi
 """
