@@ -762,6 +762,31 @@ Convert int to string and pad with 0 to get to len
 """
 int2str(i, len) = @sprintf "%05d" i
 
+
+"""
+Represents an array all filled with one value.
+
+Pretty incomplete implementation.  Probably needs something similar as
+https://github.com/JuliaLang/julia/blob/86bf95fe0a76e4750d41f569bfcb6fa1fb1805e4/base/linalg/uniformscaling.jl.
+
+TODO:
+- arithmetic
+"""
+immutable UniformArray{T,N} <: AbstractArray{T,N}
+    val::T
+end
+Base.size{T,N}(::UniformArray{T,N}) = ((typemax(Int)-1 for i in 1:N)...)
+Base.getindex(A::UniformArray, i::Int) = A.val
+Base.linearindexing{U<:UniformArray}(::Type{U}) = Base.LinearFast()
+Base.start(::UniformArray) = error("Cannot iterate over UniformArray")
+# Does not work https://github.com/JuliaLang/julia/issues/18004
+#Base.show{T,N}(io::IO, u::UniformArray{T,N}) = print(io, "UniformArray{$T,$N} with value $(u.val)")
+Base.show{T,N}(io::IO, ::MIME"text/plain", u::UniformArray{T,N}) = print(io, "UniformArray{$T,$N} with value $(u.val)")
+U = UniformArray{Float64,2}(2)
+
+#############
+# Polygons
+#############
 """
     windnr(p, poly::Matrix)
 
@@ -875,11 +900,14 @@ end
 """
     gradient3by3(g::Gridded)
     gradient3by3(x::Range,y::Range,v)
+    gradient3by3(x::Range,y::Range,v,weights::AbstractMatrix,retnan=true)
 
 2D gradient (by finite differences)
 
 - Averaged over 3x3 points.
 - no slope is calculated for the outermost points
+- with `weights` is given then it can be used for masked areas. If
+  `retnan==false` a 0 is returned where no gradient can be made.
 
 In:
 - gridded elevation set or x,y,z
@@ -898,7 +926,69 @@ function gradient3by3(x::Range,y::Range,v)
     end
     return dvx, dvy
 end
+function gradient3by3(x::Range,y::Range,v,weights::AbstractMatrix,retnan=true)
+    nx, ny = length(x),length(y)
+    dx = step(x)
+    dvx = zeros(Float64, nx, ny)
+    dvy = zeros(Float64, nx, ny)
 
+    f = [1,2,1]
+    for j=2:ny-1, i=2:nx-1
+        # xdir
+        n = 0
+        for k=-1:1
+            if weights[i+1,j+k]!=0 && weights[i-1,j+k]!=0
+                # centered difference
+                dvx[i,j] += (v[i+1,j+k]-v[i-1,j+k])/(2*dx)*f[k+2]
+                n+=1*f[k+2]
+            elseif weights[i,j+k]!=0 && weights[i-1,j+k]!=0
+                # right difference
+                dvx[i,j] += (v[i,j+k]-v[i-1,j+k])/dx*f[k+2]
+                n+=1*f[k+2]
+            elseif weights[i+1,j+k]!=0 && weights[i,j+k]!=0
+                # left difference
+                dvx[i,j] += (v[i+1,j+k]-v[i,j+k])/dx*f[k+2]
+                n+=1*f[k+2]
+            end
+        end
+        if n==0;
+            if retnan
+                dvx[i,j] = NaN
+            else
+                dvx[i,j] = 0
+            end
+        else
+            dvx[i,j] /= n
+        end
+        # ydir
+        n = 0
+        for k=-1:1
+            if weights[i+k,j+1]!=0 && weights[i+k,j-1]!=0
+                # centered difference
+                dvy[i,j] += (v[i+k,j+1]-v[i+k,j-1])/(2*dx)*f[k+2]
+                n+=1*f[k+2]
+            elseif weights[i+k,j+1]!=0 && weights[i+k,j]!=0
+                # right difference
+                dvy[i,j] += (v[i+k,j+1]-v[i+k,j])/dx*f[k+2]
+                n+=1*f[k+2]
+            elseif weights[i+k,j]!=0 && weights[i+k,j-1]!=0
+                # left difference
+                dvy[i,j] += (v[i+k,j]-v[i+k,j-1])/dx*f[k+2]
+                n+=1*f[k+2]
+            end
+        end
+        if n==0;
+            if retnan
+                dvy[i,j] = NaN
+            else
+                dvy[i,j] = 0
+            end
+        else
+            dvy[i,j] /= n
+        end
+    end
+    return dvx, dvy
+end
 
 ##############
 # Bands
@@ -1028,9 +1118,29 @@ function boxcar(A::AbstractArray, window)
     end
     out
 end
+function boxcar(A::AbstractArray, window::AbstractArray)
+    out = similar(A)
+    R = CartesianRange(size(A))
+    I1, Iend = first(R), last(R)
+    for I in R # @inbounds does not help
+        if !isnan(A[I])
+            out[I] = NaN
+        end
+        n, s = 0, zero(eltype(out))
+        for J in CartesianRange(max(I1, I-I1*window[I]), min(Iend, I+I1*window[I]))
+            if !isnan(A[J])
+                s += A[J]
+                n += 1
+            end
+        end
+        out[I] = s/n
+    end
+    out
+end
 
 # this drops points which themselves have zero weight.
-function boxcar(A::AbstractArray, window, weights::AbstractMatrix)
+#function boxcar{T1,T2,T3,N}(A::AbstractArray{T1,N}, window::AbstractArray{T2,N}, weights::AbstractArray{T3,N}=UniformArray{T,N}(1))
+function boxcar(A::AbstractArray, window, weights::AbstractArray)
     @assert size(weights)==size(A)
     out = zeros(A)
     # make an accumulator type closed under addition (needed for Bools):
@@ -1051,6 +1161,33 @@ function boxcar(A::AbstractArray, window, weights::AbstractMatrix)
     end
     out
 end
+
+# this drops points which themselves have zero weight.
+function boxcar(A::AbstractArray, window, weights::AbstractMatrix, dropmask::AbstractMatrix)
+    @assert size(weights)==size(A)
+    out = zeros(A)
+    # make an accumulator type closed under addition (needed for Bools):
+    T = typeof(one(eltype(weights)) + one(eltype(weights)))
+    R = CartesianRange(size(A))
+    I1, Iend = first(R), last(R)
+    @inbounds @fastmath for I in R
+        if dropmask[I]
+            out[I] = 0
+            continue
+        end
+        if weights[I]==0
+            out[I] = 0
+        end
+        n, s = zero(T), zero(eltype(out))
+        for J in CartesianRange(max(I1, I-I1*window), min(Iend, I+I1*window))
+            s += A[J]*weights[J]
+            n += weights[J]
+        end
+        out[I] = s/n
+    end
+    out
+end
+
 
 """
     boxcar_matrix(T::DataType, window::Integer, weights::AbstractMatrix)
