@@ -5,9 +5,9 @@ module VAWTools
 include("other-pks-fixes.jl")
 
 # General tools, maybe applicable more widely.
-export read_agr, write_agr, read_xyn, inpoly, AGridded, Gridded, Gridded1d, Traj, map_onto_bands, make_1Dglacier,
+export read_agr, write_agr, read_xyn, inpoly, AGridded, Gridded, Gridded1d, Traj,
     smooth_vector, absslope, gradient3by3,
-    downsample, split_traj!, boxcar, boxcar_matrix, bin_grid, piecewiselinear, split_poly,
+    downsample, split_traj!, boxcar, boxcar_matrix, apply_boxcar_matrix, bin_grid, piecewiselinear, split_poly,
     transform_proj
 
 
@@ -775,14 +775,13 @@ TODO:
 immutable UniformArray{T,N} <: AbstractArray{T,N}
     val::T
 end
-Base.size{T,N}(::UniformArray{T,N}) = ((typemax(Int)-1 for i in 1:N)...)
+Base.size{T,N}(::UniformArray{T,N}) = ntuple(x->typemax(Int), Val{N})
 Base.getindex(A::UniformArray, i::Int) = A.val
 Base.linearindexing{U<:UniformArray}(::Type{U}) = Base.LinearFast()
 Base.start(::UniformArray) = error("Cannot iterate over UniformArray")
 # Does not work https://github.com/JuliaLang/julia/issues/18004
 #Base.show{T,N}(io::IO, u::UniformArray{T,N}) = print(io, "UniformArray{$T,$N} with value $(u.val)")
 Base.show{T,N}(io::IO, ::MIME"text/plain", u::UniformArray{T,N}) = print(io, "UniformArray{$T,$N} with value $(u.val)")
-U = UniformArray{Float64,2}(2)
 
 #############
 # Polygons
@@ -926,6 +925,8 @@ function gradient3by3(x::Range,y::Range,v)
     end
     return dvx, dvy
 end
+gradient3by3(g::Gridded,weights::AbstractMatrix,retnan=true) =
+    gradient3by3(g.x,g.y,g.v,weights,retnan)
 function gradient3by3(x::Range,y::Range,v,weights::AbstractMatrix,retnan=true)
     nx, ny = length(x),length(y)
     dx = step(x)
@@ -1165,11 +1166,13 @@ end
 # end
 
 # this does not drop points which themselves have zero weight, only points on dropmask.
-function boxcar(A::AbstractArray, window, weights::AbstractMatrix, dropmask::AbstractMatrix=falses(size(weights)))
+function boxcar{T,N}(A::AbstractArray{T,N}, window,
+                     weights::AbstractArray,
+                     dropmask::AbstractArray=(weights.==0))
     @assert size(weights)==size(A)
     out = zeros(A)
     # make an accumulator type closed under addition (needed for Bools):
-    T = typeof(one(eltype(weights)) + one(eltype(weights)))
+    AT = typeof(one(eltype(weights)) + one(eltype(weights)))
     R = CartesianRange(size(A))
     I1, Iend = first(R), last(R)
     @inbounds @fastmath for I in R
@@ -1177,9 +1180,9 @@ function boxcar(A::AbstractArray, window, weights::AbstractMatrix, dropmask::Abs
             out[I] = A[I]
             continue
         end
-        n, s = zero(T), zero(eltype(out))
+        n, s = zero(AT), zero(T)
         for J in CartesianRange(max(I1, I-I1*window), min(Iend, I+I1*window))
-            s += A[J]*weights[J]
+            s += A[J] * convert(T, weights[J])
             n += weights[J]
         end
         out[I] = s/n
@@ -1201,7 +1204,10 @@ Apply with
 
     apply_boxcar_matrix(M, orig)
 """
-function boxcar_matrix{T}(::Type{T}, window::Integer, weights::AbstractMatrix, dropmask::AbstractMatrix=falses(size(weights)))
+function boxcar_matrix{T,TT,N}(::Type{T}, window::Integer,
+                               weights::AbstractArray{TT,N},
+                               dropmask::AbstractArray=(weights.==0))
+                               # dropmask::AbstractArray=BitArray{N}(ntuple(x->0, Val{N})...))
     # make an accumulator type closed under addition (needed for Ints and Bools):
     Tacc = promote_type(T, eltype(weights))
     nr = size(weights,1)

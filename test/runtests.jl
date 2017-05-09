@@ -373,7 +373,9 @@ dropmask = falses(nr,nc)
 dropmask[5,6] = true
 # with weights
 filt1 = VAWTools.boxcar(orig, window, weights)
+@inferred VAWTools.boxcar(orig, window, weights)
 M = VAWTools.boxcar_matrix(T, window, weights)
+@inferred VAWTools.boxcar_matrix(T, window, weights)
 @test size(M,1)==size(M,2)
 @test size(M,1)==length(orig)
 filt2 = VAWTools.apply_boxcar_matrix(M, orig)
@@ -384,7 +386,9 @@ for i=eachindex(orig)
 end
 # with weightsb
 filt1 = VAWTools.boxcar(orig, window, weightsb)
+@inferred VAWTools.boxcar(orig, window, weightsb)
 M = VAWTools.boxcar_matrix(T, window, weightsb)
+@inferred VAWTools.boxcar_matrix(T, window, weightsb)
 @test size(M,1)==size(M,2)
 @test size(M,1)==length(orig)
 filt2 = VAWTools.apply_boxcar_matrix(M, orig)
@@ -395,7 +399,9 @@ for i=eachindex(orig)
 end
 # with weightsbb
 filt1 = VAWTools.boxcar(orig, window, weightsbb)
+@inferred VAWTools.boxcar(orig, window, weightsbb)
 M = VAWTools.boxcar_matrix(T, window, weightsbb)
+@inferred VAWTools.boxcar_matrix(T, window, weightsbb)
 @test size(M,1)==size(M,2)
 @test size(M,1)==length(orig)
 filt2 = VAWTools.apply_boxcar_matrix(M, orig)
@@ -407,7 +413,9 @@ end
 
 # with weights and dropmask
 filt1 = VAWTools.boxcar(orig, window, weightsbb, dropmask)
+@inferred VAWTools.boxcar(orig, window, weightsbb, dropmask)
 M = VAWTools.boxcar_matrix(T, window, weightsbb, dropmask)
+@inferred VAWTools.boxcar_matrix(T, window, weightsbb, dropmask)
 @test size(M,1)==size(M,2)
 @test size(M,1)==length(orig)
 filt2 = VAWTools.apply_boxcar_matrix(M, orig)

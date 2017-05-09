@@ -4,6 +4,8 @@
 #
 # TODO: add extrapolation too (second half of make_bands)
 
+export map_onto_bands, make_1Dglacier, map_back_to_2D, map_back_to_2D!
+
 _binround(binsize_or_bins) = -floor(Int, log10(binsize_or_bins))
 
 """
@@ -267,6 +269,28 @@ function map_onto_bands(bandi, field::Matrix, fn=mean, fill=NaN)
     return out
 end
 map_onto_bands(bandi, field::Gridded, fn=mean) = map_onto_bands(bandi, field.v, fn=mean)
+
+"""
+    map_back_to_2D(dims2d, bandi, field1d)
+
+Maps 1D field back onto 2D.  More or less inverse of map_onto_bands.
+"""
+function map_back_to_2D(dims2d, bandi, field1d)
+    out = zeros(eltype(field1d), dims2d)
+    map_back_to_2D!(out, bandi, field1d)
+    out
+end
+"""
+    map_back_to_2D!(out2d, bandi, field1d)
+
+Maps 1D field back onto 2D.  More or less inverse of map_onto_bands.
+"""
+function map_back_to_2D!(out, bandi, field1d)
+    for (i,is) in enumerate(bandi)
+        out[is] = field1d[i]
+    end
+    nothing
+end
 
 
 """
@@ -643,6 +667,7 @@ end
     calc_u(q1d, boundaries, thick, alpha, ux, uy, dx, mask, bands, lengths,
            flux_dir_window, window_frac=1.5,
            x=nothing, y=nothing) # these are only needed for plotting
+    -> u2d, u2d_at_bands, scaling-factors-1d, mask_u2d_at_bands
 
 Calculates a 2D field of depth averaged ice flow speed `ubar` which has the
 same flux across elevation band boundaries as the supplied 1D flux
@@ -660,7 +685,8 @@ TODO:
 """
 function calc_u(q1d, boundaries, u_trial, thick,
                 ux, uy, dx, mask, bands, lengths,
-                flux_dir_window, window_frac_or_boxcarM;
+                flux_dir_window, # in [m]
+                window_frac_or_boxcarM;
                 plotyes=false,
                 x=nothing, y=nothing) # these are only needed for plotting
     plotyes && figure()
@@ -683,7 +709,7 @@ function calc_u(q1d, boundaries, u_trial, thick,
         js = Int[]
         for l in bb
             #@assert orientation(l)
-            ff, fi, fj, fx, fy = calc_fluxdir(l, ux, uy, flux_dir_window, dx)
+            ff, fi, fj, fx, fy = calc_fluxdir(l, ux, uy, Int(flux_dir_window÷dx), dx)
             if plotyes
                 quiver(x[fi],y[fj],fx,fy)
             end
@@ -717,9 +743,9 @@ function calc_u(q1d, boundaries, u_trial, thick,
     end
     if isa(window_frac_or_boxcarM, Number)
         window_frac = window_frac_or_boxcarM
-        return ubar, boxcar(ubar_, Int((window_frac*maximum(lengths))÷dx)+1, mask_ubar, !mask), facs, mask_ubar
+        return boxcar(ubar_, Int((window_frac*maximum(lengths))÷dx)+1, mask_ubar, !mask), ubar, facs, mask_ubar
     else
         M = window_frac_or_boxcarM
-        return ubar, VAWTools.apply_boxcar_matrix(M, ubar_), facs, mask_ubar
+        return VAWTools.apply_boxcar_matrix(M, ubar_), ubar, facs, mask_ubar
     end
 end
