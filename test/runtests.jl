@@ -368,12 +368,15 @@ orig = rand(T,nr,nc)
 weights = rand(nr,nc)
 weightsb = bitrand(nr,nc)
 weightsbb = convert(Matrix{Bool}, weightsb)
+
+dropmask = falses(nr,nc)
+dropmask[5,6] = true
 # with weights
 filt1 = VAWTools.boxcar(orig, window, weights)
 M = VAWTools.boxcar_matrix(T, window, weights)
 @test size(M,1)==size(M,2)
 @test size(M,1)==length(orig)
-filt2 = reshape(M*reshape(orig, length(orig)), size(orig))
+filt2 = VAWTools.apply_boxcar_matrix(M, orig)
 @test eltype(orig)==eltype(filt1)
 @test eltype(orig)==eltype(filt2)
 for i=eachindex(orig)
@@ -384,7 +387,7 @@ filt1 = VAWTools.boxcar(orig, window, weightsb)
 M = VAWTools.boxcar_matrix(T, window, weightsb)
 @test size(M,1)==size(M,2)
 @test size(M,1)==length(orig)
-filt2 = reshape(M*reshape(orig, length(orig)), size(orig))
+filt2 = VAWTools.apply_boxcar_matrix(M, orig)
 @test eltype(orig)==eltype(filt1)
 @test eltype(orig)==eltype(filt2)
 for i=eachindex(orig)
@@ -395,12 +398,57 @@ filt1 = VAWTools.boxcar(orig, window, weightsbb)
 M = VAWTools.boxcar_matrix(T, window, weightsbb)
 @test size(M,1)==size(M,2)
 @test size(M,1)==length(orig)
-filt2 = reshape(M*reshape(orig, length(orig)), size(orig))
+filt2 = VAWTools.apply_boxcar_matrix(M, orig)
 @test eltype(orig)==eltype(filt1)
 @test eltype(orig)==eltype(filt2)
 for i=eachindex(orig)
     @test_approx_eq filt1[i] filt2[i]
 end
+
+# with weights and dropmask
+filt1 = VAWTools.boxcar(orig, window, weightsbb, dropmask)
+M = VAWTools.boxcar_matrix(T, window, weightsbb, dropmask)
+@test size(M,1)==size(M,2)
+@test size(M,1)==length(orig)
+filt2 = VAWTools.apply_boxcar_matrix(M, orig)
+@test eltype(orig)==eltype(filt1)
+@test eltype(orig)==eltype(filt2)
+for i=eachindex(orig)
+    @test_approx_eq filt1[i] filt2[i]
+end
+
+# with NaN poisoning
+orig[1,1] = NaN
+filt1 = VAWTools.boxcar(orig, window, weightsbb, dropmask)
+M = VAWTools.boxcar_matrix(T, window, weightsbb, dropmask)
+@test size(M,1)==size(M,2)
+@test size(M,1)==length(orig)
+filt2 = VAWTools.apply_boxcar_matrix(M, orig)
+@test eltype(orig)==eltype(filt1)
+@test eltype(orig)==eltype(filt2)
+for i=eachindex(orig)
+    @test_approx_eq filt1[i] filt2[i]
+end
+
+# when NaN is masked then the M-filter is different:
+orig[1,1] = NaN
+weightsbb[1,1] = 0
+filt1 = VAWTools.boxcar(orig, window, weightsbb, dropmask)
+M = VAWTools.boxcar_matrix(T, window, weightsbb, dropmask)
+@test size(M,1)==size(M,2)
+@test size(M,1)==length(orig)
+filt2 = VAWTools.apply_boxcar_matrix(M, orig)
+@test eltype(orig)==eltype(filt1)
+@test eltype(orig)==eltype(filt2)
+for j=1:nc,i=1:nr
+    if i<5 && j<5
+        @test isnan(filt1[i,j])
+        @test !isnan(filt2[i,j])
+    else
+        @test_approx_eq filt1[i,j] filt2[i,j]
+    end
+end
+
 
 ####
 # piecewiselinear

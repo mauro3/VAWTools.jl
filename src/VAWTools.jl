@@ -1084,18 +1084,20 @@ function mean_weighted(a,w)
 end
 
 """
-    boxcar(A::AbstractArray, window[, weights])
+    boxcar(A::AbstractArray, window[, weights, dropmask])
 
-Boxcar filter.  The two argument call ignores NaNs.  The three
+Boxcar filter.  The two argument call ignores NaNs.  The three & four
 argument call uses weights instead of NaNs, it can be a lot faster.
-Note that even masked NaNs will poison the result!
 
 For the weights it may be faster to use non Bool arrays or BitArrays,
-say Int8.
+say Int8.  Note that even NaNs where weight==0 will poison the result!
+
+No average is calculated for points where dropmask==true, instead
+their original value will be used.
 
 Also works for Vectors.
 
-Smoothing occurs over x+/-window.
+Smoothing occurs over +/-window indices.
 
 From http://julialang.org/blog/2016/02/iteration
 """
@@ -1138,32 +1140,32 @@ function boxcar(A::AbstractArray, window::AbstractArray)
     out
 end
 
-# this drops points which themselves have zero weight.
-#function boxcar{T1,T2,T3,N}(A::AbstractArray{T1,N}, window::AbstractArray{T2,N}, weights::AbstractArray{T3,N}=UniformArray{T,N}(1))
-function boxcar(A::AbstractArray, window, weights::AbstractArray)
-    @assert size(weights)==size(A)
-    out = zeros(A)
-    # make an accumulator type closed under addition (needed for Bools):
-    T = typeof(one(eltype(weights)) + one(eltype(weights)))
-    R = CartesianRange(size(A))
-    I1, Iend = first(R), last(R)
-    @inbounds @fastmath for I in R
-        if weights[I]==0
-            out[I] = 0
-            continue
-        end
-        n, s = zero(T), zero(eltype(out))
-        for J in CartesianRange(max(I1, I-I1*window), min(Iend, I+I1*window))
-            s += A[J]*weights[J]
-            n += weights[J]
-        end
-        out[I] = s/n
-    end
-    out
-end
+# # this drops points which themselves have zero weight.
+# #function boxcar{T1,T2,T3,N}(A::AbstractArray{T1,N}, window::AbstractArray{T2,N}, weights::AbstractArray{T3,N}=UniformArray{T,N}(1))
+# function boxcar(A::AbstractArray, window, weights::AbstractArray)
+#     @assert size(weights)==size(A)
+#     out = zeros(A)
+#     # make an accumulator type closed under addition (needed for Bools):
+#     T = typeof(one(eltype(weights)) + one(eltype(weights)))
+#     R = CartesianRange(size(A))
+#     I1, Iend = first(R), last(R)
+#     @inbounds @fastmath for I in R
+#         if weights[I]==0
+#             out[I] = 0
+#             continue
+#         end
+#         n, s = zero(T), zero(eltype(out))
+#         for J in CartesianRange(max(I1, I-I1*window), min(Iend, I+I1*window))
+#             s += A[J]*weights[J]
+#             n += weights[J]
+#         end
+#         out[I] = s/n
+#     end
+#     out
+# end
 
-# this drops points which themselves have zero weight.
-function boxcar(A::AbstractArray, window, weights::AbstractMatrix, dropmask::AbstractMatrix)
+# this does not drop points which themselves have zero weight, only points on dropmask.
+function boxcar(A::AbstractArray, window, weights::AbstractMatrix, dropmask::AbstractMatrix=falses(size(weights)))
     @assert size(weights)==size(A)
     out = zeros(A)
     # make an accumulator type closed under addition (needed for Bools):
@@ -1172,11 +1174,8 @@ function boxcar(A::AbstractArray, window, weights::AbstractMatrix, dropmask::Abs
     I1, Iend = first(R), last(R)
     @inbounds @fastmath for I in R
         if dropmask[I]
-            out[I] = 0
+            out[I] = A[I]
             continue
-        end
-        if weights[I]==0
-            out[I] = 0
         end
         n, s = zero(T), zero(eltype(out))
         for J in CartesianRange(max(I1, I-I1*window), min(Iend, I+I1*window))
@@ -1190,13 +1189,19 @@ end
 
 
 """
-    boxcar_matrix(T::DataType, window::Integer, weights::AbstractMatrix)
+    boxcar_matrix(T::DataType, window::Integer, weights::AbstractMatrix[, dropmask])
 
 This produces a sparse matrix which can be used to apply the filter:
-`bx*hs2d`. Expensive to do create but very fast to apply, thus use
-when needing the same filter several times.
+`bx*hs2d`. Relatively expensive to create but very fast to apply, thus
+use when needing the same filter several times.
+
+Note, that here NaNs where weight==0 do not poison the result.
+
+Apply with
+
+    apply_boxcar_matrix(M, orig)
 """
-function boxcar_matrix{T}(::Type{T}, window::Integer, weights::AbstractMatrix)
+function boxcar_matrix{T}(::Type{T}, window::Integer, weights::AbstractMatrix, dropmask::AbstractMatrix=falses(size(weights)))
     # make an accumulator type closed under addition (needed for Ints and Bools):
     Tacc = promote_type(T, eltype(weights))
     nr = size(weights,1)
@@ -1210,11 +1215,14 @@ function boxcar_matrix{T}(::Type{T}, window::Integer, weights::AbstractMatrix)
     R = CartesianRange(size(weights))
     I1, Iend = first(R), last(R)
     @inbounds @fastmath for I in R
-        if weights[I]==0
-            # do nothing
+        i = (I.I[2]-1)*nr + I.I[1] # row of output matrix
+        if dropmask[I]
+            # do not average at this location, preserve original value
+            push!(is, i)
+            push!(js, i)
+            push!(vs, 1)
             continue
         end
-        i = (I.I[2]-1)*nr + I.I[1] # row of output matrix
         nrows = 0 # number of contributing cells
         acc = zero(Tacc) # sum of all weights for one cell
         for J in CartesianRange(max(I1, I-I1*window), min(Iend, I+I1*window))
@@ -1236,6 +1244,9 @@ function boxcar_matrix{T}(::Type{T}, window::Integer, weights::AbstractMatrix)
     end
     return sparse(is, js, vs, length(weights), length(weights))
 end
+
+"Apply the boxcar filter matrix and reshape result"
+apply_boxcar_matrix(M, orig) = reshape(M*reshape(orig, length(orig)), size(orig))
 
 """
 Returns a piecewise linear function through points (xs,ys).

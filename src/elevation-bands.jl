@@ -659,10 +659,10 @@ TODO:
 - pre-calculate the boxcar filter
 """
 function calc_u(q1d, boundaries, u_trial, thick,
-                         ux, uy, dx, mask, bands, lengths,
-                         flux_dir_window, window_frac;
-                         plotyes=false,
-                         x=nothing, y=nothing) # these are only needed for plotting
+                ux, uy, dx, mask, bands, lengths,
+                flux_dir_window, window_frac_or_boxcarM;
+                plotyes=false,
+                x=nothing, y=nothing) # these are only needed for plotting
     plotyes && figure()
     dims = size(mask)
 
@@ -708,12 +708,18 @@ function calc_u(q1d, boundaries, u_trial, thick,
             ubar[i,j] = u[n]
         end
     end
-    mask_ = mask & (!isnan(ubar)) # location of all cells for which `ubar` was calculated
+    mask_ubar = mask & (!isnan(ubar)) # location of all cells for which `ubar` was calculated
     ubar_ = copy(ubar)
     ubar_[isnan(ubar_)] = 0
     if plotyes
         # imshow(binmat',origin="lower", extent=(x[1],x[end],y[1],y[end]), cmap="flag"); colorbar();
         imshow(ubar',origin="lower", extent=(x[1],x[end],y[1],y[end]),); colorbar(); clim(0,50)
     end
-    return ubar, boxcar(ubar_, Int((window_frac*maximum(lengths))÷dx)+1, mask_, !mask), facs # this ignores NaNs
+    if isa(window_frac_or_boxcarM, Number)
+        window_frac = window_frac_or_boxcarM
+        return ubar, boxcar(ubar_, Int((window_frac*maximum(lengths))÷dx)+1, mask_ubar, !mask), facs, mask_ubar
+    else
+        M = window_frac_or_boxcarM
+        return ubar, VAWTools.apply_boxcar_matrix(M, ubar_), facs, mask_ubar
+    end
 end
