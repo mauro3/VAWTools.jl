@@ -686,10 +686,36 @@ TODO:
 function calc_u(q1d, boundaries, u_trial, thick,
                 ux, uy, dx, mask, bands, lengths,
                 flux_dir_window, # in [m]
-                window_frac_or_boxcarM;
+                boxcarM::AbstractMatrix;
                 plotyes=false,
-                x=nothing, y=nothing) # these are only needed for plotting
-    plotyes && figure()
+                x=nothing, y=nothing)
+    ubar_, ubar, facs, mask_ubar = _calc_u(q1d, boundaries, u_trial, thick,
+                                    ux, uy, dx, mask, bands, lengths,
+                                    flux_dir_window, # in [m]
+                                           plotyes,x,y)
+    # below type assertion is needed for type-stability ?!
+    return VAWTools.apply_boxcar_matrix(boxcarM, ubar_)::Array{eltype(q1d),2}, ubar, facs, mask_ubar
+end
+function calc_u(q1d, boundaries, u_trial, thick,
+                ux, uy, dx, mask, bands, lengths,
+                flux_dir_window, # in [m]
+                window_frac;
+                plotyes=false,
+                x=nothing, y=nothing)
+    ubar_, ubar, facs, mask_ubar = _calc_u(q1d, boundaries, u_trial, thick,
+                                    ux, uy, dx, mask, bands, lengths,
+                                    flux_dir_window, # in [m]
+                                    plotyes,x,y)
+    return boxcar(ubar_, Int((window_frac*maximum(lengths))÷dx)+1, mask_ubar, !mask), ubar, facs, mask_ubar
+end
+
+# this helper function is needed for type stability
+function _calc_u(q1d, boundaries, u_trial, thick,
+                ux, uy, dx, mask, bands, lengths,
+                flux_dir_window,
+                plotyes,
+                x, y) # these are only needed for plotting
+    #plotyes && figure()
     dims = size(mask)
 
     # this calculates the u at all elevation band boundaries:
@@ -710,9 +736,9 @@ function calc_u(q1d, boundaries, u_trial, thick,
         for l in bb
             #@assert orientation(l)
             ff, fi, fj, fx, fy = calc_fluxdir(l, ux, uy, Int(flux_dir_window÷dx), dx)
-            if plotyes
-                quiver(x[fi],y[fj],fx,fy)
-            end
+            # if plotyes
+            #     quiver(x[fi],y[fj],fx,fy)
+            # end
             append!(is, fi)
             append!(js, fj)
             append!(ffs, ff)
@@ -737,15 +763,10 @@ function calc_u(q1d, boundaries, u_trial, thick,
     mask_ubar = mask & (!isnan(ubar)) # location of all cells for which `ubar` was calculated
     ubar_ = copy(ubar)
     ubar_[isnan(ubar_)] = 0
-    if plotyes
-        # imshow(binmat',origin="lower", extent=(x[1],x[end],y[1],y[end]), cmap="flag"); colorbar();
-        imshow(ubar',origin="lower", extent=(x[1],x[end],y[1],y[end]),); colorbar(); clim(0,50)
-    end
-    if isa(window_frac_or_boxcarM, Number)
-        window_frac = window_frac_or_boxcarM
-        return boxcar(ubar_, Int((window_frac*maximum(lengths))÷dx)+1, mask_ubar, !mask), ubar, facs, mask_ubar
-    else
-        M = window_frac_or_boxcarM
-        return VAWTools.apply_boxcar_matrix(M, ubar_), ubar, facs, mask_ubar
-    end
+    # if plotyes
+    #     # imshow(binmat',origin="lower", extent=(x[1],x[end],y[1],y[end]), cmap="flag"); colorbar();
+    #     imshow(ubar',origin="lower", extent=(x[1],x[end],y[1],y[end]),); colorbar(); clim(0,50)
+    # end
+
+    return ubar_, ubar, facs, mask_ubar
 end
