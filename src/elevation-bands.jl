@@ -102,7 +102,6 @@ function make_1Dglacier(dem::Gridded, binsize_or_bins, glaciermask=BitArray([]);
         error("Something's amiss, sum of area of bands $(sum(areas)) not equal total area $totalarea,")
     end
     box_diag = sqrt((dem.x[end]-dem.x[1])^2 + (dem.y[end]-dem.y[1])^2)
-    @show box_diag, sum(lengths)
     if abs(sum(lengths)-box_diag)/box_diag>0.4
         warn("Glacier length from might be wrong. Band-length: $(sum(lengths)/1e3)km, bounding-box diag: $(box_diag/1e3)km")
     end
@@ -419,7 +418,7 @@ end
 Return whether the cells are on left, right or both of the two cells.
 
 """
-function orientation(e1::Edge, e2::Edge)
+function orientation(e1::Edge, e2::Edge, throwerror=true)
     n1,n2 = get_nodes(e1)
     m1,m2 = get_nodes(e2)
     if n2==m1
@@ -428,8 +427,10 @@ function orientation(e1::Edge, e2::Edge)
         return left
     elseif n1==m1 || n2==m2
         return _noedge
-    else
+    elseif throwerror
         error("The two edges:\n $e1 $e2 are not connected")
+    else
+        return _noedge
     end
 end
 
@@ -470,43 +471,12 @@ Return an adjacent edge of input edge.  Pops returned edge off
 `edges`.  If no edge is found, return `Edge(-1,-1,nodege)`.
 """
 function next_edge!(edges::Set{Edge}, edge::Edge)
-    edge.loc==_noedge && error()
-    # lookup table for where to look for next edge.
-    tolookat = Dict(
-                left =>Dict(
-                        (-1,1) => (lower,right),
-                        (-1,0) => (lower,upper),
-                        (-1,-1)=> (upper,right),
-                        (0,1)  => (left,lower),
-                        (0,0)  => (upper,lower),
-                        (0,-1) => (left,upper)),
-                right=>Dict(
-                        (0,1)  => (lower,right),
-                        (0,0)  => (lower,upper),
-                        (0,-1) => (upper,right),
-                        (1,1)  => (left,lower),
-                        (1,0)  => (upper,lower),
-                        (1,-1) => (left,upper)),
-                lower=>Dict(
-                        (-1,0) => (lower,right),
-                        (0,0)  => (left,right),
-                        (1,0)  => (left,lower),
-                        (-1,-1)=> (upper,right),
-                        (0,-1) => (left,right),
-                        (1,-1) => (left,upper)),
-                upper=>Dict(
-                        (-1,1) => (lower,right),
-                        (0,1)  => (left,right),
-                        (1,1)  => (left,lower),
-                        (-1,0) => (upper,right),
-                        (0,0)  => (left,right),
-                        (1,0)  => (left,upper))
-                )
-    look = tolookat[edge.loc]
-    for ((i,j), locs) in look
+    edge.loc==_noedge && error("Not a proper edge: $edge")
+    locs = (left,right,lower,upper)
+    for i=[0,-1,1],j=[0,-1,1]
         for loc in locs
             test_edge = Edge(edge.i+i,edge.j+j,loc)
-            if test_edge in edges
+            if orientation(edge, test_edge,false)==left && (test_edge in edges)
                 return pop!(edges, test_edge)
             end
         end
@@ -514,6 +484,7 @@ function next_edge!(edges::Set{Edge}, edge::Edge)
     # nothing found
     return noedge
 end
+
 
 """
     calc_boundaries(bands, bandi, binmat, landmask=nothing)
@@ -535,7 +506,7 @@ function calc_boundaries(bands, bandi, binmat, landmask=nothing)
     if landmask!=nothing
         # encode sea cells in binmat
         binmat = copy(binmat)
-        binmat[landmask.==0 & binmat.==0] = -1
+        binmat[(landmask.==0) & (binmat.==0)] = -1
     end
 
     # The boundaries of all bands:
