@@ -34,6 +34,15 @@ function make_1Dglacier(dem::Gridded, binsize_or_bins, glaciermask=BitArray([]);
                         alpha_max=deg2rad(60.0),
                         FILL=-9999999.0)
 
+    # # set mask at edges to zero
+    if glaciermask==BitArray([])
+        glaciermask = trues(size(dem.v))
+        glaciermask[[1,end],:] = false
+        glaciermask[:,[1,end]] = false
+    end
+    # due to a limitation in `absslope`:
+    @assert all(glaciermask[[1,end],:].==false)
+    @assert all(glaciermask[:,[1,end]].==false)
 
     # Smooth dem to get smooth alpha, smoother bands.  This is in
     # particular important when there is cross-flow bumpiness, such as
@@ -46,7 +55,12 @@ function make_1Dglacier(dem::Gridded, binsize_or_bins, glaciermask=BitArray([]);
         fillmask = dem.v.!=FILL
         dem.v[:] = boxcar(dem.v, round(Int,window_dem_smooth/dx), fillmask)
         dem.v[!fillmask] = FILL
+    else
+        fillmask = dem.v.!=FILL
     end
+    # no FILL inside glaciermask
+    @assert !any(dem.v[glaciermask].==FILL)
+
     # 2D slopes
     alpha2d = absslope(dem)
 
@@ -88,6 +102,7 @@ function make_1Dglacier(dem::Gridded, binsize_or_bins, glaciermask=BitArray([]);
         error("Something's amiss, sum of area of bands $(sum(areas)) not equal total area $totalarea,")
     end
     box_diag = sqrt((dem.x[end]-dem.x[1])^2 + (dem.y[end]-dem.y[1])^2)
+    @show box_diag, sum(lengths)
     if abs(sum(lengths)-box_diag)/box_diag>0.4
         warn("Glacier length from might be wrong. Band-length: $(sum(lengths)/1e3)km, bounding-box diag: $(box_diag/1e3)km")
     end
@@ -120,7 +135,7 @@ function band_slope(alphas, bandnr, alpha_min, alpha_max)
 
     n = length(alphas)
     if n==0
-        error("Band with no element?!")
+        error("Band $bandnr has no element!")
         return deg2rad(45)
     end
     # magic slope calculation
@@ -166,7 +181,7 @@ Return:
 """
 bin_grid(g::Gridded, binsize_or_bins, mask=BitArray([]); binround=_binround(binsize_or_bins)) =
     bin_grid(g.v, binsize_or_bins, mask; binround=binround)
-function bin_grid(v::Matrix, binsize_or_bins, mask=BitArray([]); binround=-floor(Int, log10(binsize_or_bins)))
+function bin_grid(v::Matrix, binsize_or_bins, mask=BitArray([]); binround=_binround(binsize_or_bins))
     if isempty(mask)
         v = v
         ginds = 1:length(v)
@@ -442,7 +457,8 @@ function orientation(l::Vector)
     # establish orientation of first two segments
     ori = orientation(l[1],l[2])
     for i=3:length(l)
-        orientation(l[i-1],l[i])!=ori && error("Line not consistently oriented")
+        orientation(l[i-1],l[i])!=ori &&
+            error("Line not consistently oriented at edges: $(i-1), $i")
     end
     return ori
 end

@@ -8,9 +8,42 @@ function sha(fn)
     end
 end
 
+## Gridded
+##########
+g = Gridded(1.:37,1:17., rand(37,17))
+gc = Gridded(1.:10,1:11., 5*ones(10,11) )
+
+@test g.v==downsample(g,1).v
+@test_throws ArgumentError downsample(g,0)
+
+for i=1:10
+    @test all(downsample(gc,i).v.==5)
+    @test downsample(g,i).v==boxcar(g.v,Int(floor((i)/2)))[1:i:end,1:i:end]
+end
+
+gc.v[4,5] = NaN
+for i=1:10
+    ds = downsample(gc,i).v
+    @test all((ds.==5) | (isnan(ds)))
+    @test downsample(g,i).v==boxcar(g.v,Int(floor((i)/2)))[1:i:end,1:i:end]
+end
+averagemask = trues(size(gc.v))
+for i=1:10
+    ds = downsample(gc,i,1,true,averagemask).v
+    @test all((ds.==5) | (isnan(ds)))
+    @test downsample(g,i,1,true,trues(size(g.v))).v==boxcar(g.v,Int(floor((i)/2)))[1:i:end,1:i:end]
+end
+averagemask = trues(size(g.v))
+averagemask[2,1] = false
+for i=1:10
+    ds = downsample(g,i,1,true,averagemask).v
+    bc = boxcar(g.v,Int(floor((i)/2)),averagemask)[1:i:end,1:i:end]
+    @test bc==ds
+end
 
 
-## tools.jl tests
+
+## File IO
 #################
 const todelete = []
 function tempfn(ext="")
@@ -492,11 +525,14 @@ y = 1001:2.3:1100
 ele = x .+ y'
 mask = trues(size(ele))
 mask[1:10,:] = false
+mask[[1,end],:] = false
+mask[:,[1,end]] = false
 g = Gridded(x,y,ele)
 bands, bandi = bin_grid(g, 10.0, mask)
 @test length(bands)==length(bandi)
 binmat = VAWTools.bins2matrix(g, bands, bandi)
 @test all(binmat[1:10,:].==0)
+@test all(binmat[:,1].==0)
 
 xx,yy = -50:11:23, 900.0:7:1200
 othergrid = Gridded(xx, yy, rand(length(xx),length(yy)))

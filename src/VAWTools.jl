@@ -79,20 +79,72 @@ function Base.convert{T2,T1}(::Type{Gridded{T2}}, g::Gridded{T1})
         Gridded(g.x, g.y, g.midpoint, convert(Matrix{T2}, g.v))
     end
 end
-function downsample(g::Gridded, step, start=1)
+
+"""
+    downsample(g::Gridded, step, start=1, average=true, averagemask=all_points)
+
+Makes a `Gridded` smaller by downsampling.  If averaging (by default),
+the window is chosen such that there is no overlap (for odd `step`) or
+one cell overlap (for even `step`).
+
+"""
+function downsample(g::Gridded, step, start=1, average=true, averagemask=UniformArray{Bool,2}(true))
+    rx = start:step:size(g.v,1)
+    ry = start:step:size(g.v,2)
+    nx,ny = length(rx),length(ry)
+    x = g.x[rx]
+    y = g.y[ry]
+    midpoint = g.midpoint
+    # Window: no overlap on odd step sizes
+    window = average ? Int(floor((step)/2)) : 1
+    vnew = _downsample_boxcar(g.v,rx,ry,window,averagemask)
     if haserror(g)
-        Gridded(g.x[start:step:end],
-                g.y[start:step:end],
-                g.midpoint,
-                g.v[start:step:end, start:step:end],
-                g.err[start:step:end, start:step:end])
+        errnew = _downsample_boxcar(g.err,rx,ry,window,averagemask)
+
+        Gridded(x,y,midpoint,vnew,errnew)
     else
-        Gridded(g.x[start:step:end],
-                g.y[start:step:end],
-                g.midpoint,
-                g.v[start:step:end, start:step:end])
+        Gridded(x,y,midpoint,vnew)
     end
 end
+function _downsample_boxcar(v,rx,ry,window,averagemask)
+    # make type which allows for averaging
+    T = typeof(one(eltype(v))/2)
+    vnew = zeros(T,length(rx), length(ry))
+    if window==0
+        for (j,rj) in enumerate(ry)
+            for (i,ri) in enumerate(rx)
+                vnew[i,j]=v[ri,rj]
+            end
+        end
+        return vnew
+    end
+    # Follows boxcar filter below
+    for (j,rj) in enumerate(ry)
+        for (i,ri) in enumerate(rx)
+            # keep NaNs or points outside averagemask as they are:
+            if isnan(v[ri,rj]) || !averagemask[ri,rj]
+                vnew[i,j] = v[ri,rj]
+                continue
+            end
+            # other points make an average:
+            v0 = zero(T)
+            n = 0
+            for jj=max(1,rj-window):min(size(v,2),rj+window)
+                for ii=max(1,ri-window):min(size(v,1),ri+window)
+                    tmp = v[ii,jj]
+                    if !isnan(tmp) && averagemask[ii,jj]
+                        v0 += tmp
+                        n+=1
+                    end
+                end
+            end
+            vnew[i,j] = v0/n
+        end
+    end
+    return vnew
+end
+
+
 # (+)(g1::Gridded, g2::Gridded) = (@assert g1.midpoint==g2.midpoint; Gridded(g1.x, g1.y, g1.midpoint, g1.v+g2.v))
 # (*)(n::Number, g::Gridded) = Gridded(g.x, g.y, g.midpoint, g.v*n)
 # (*)(g::Gridded, n::Number) = n*g
@@ -927,6 +979,7 @@ function gradient3by3(x::Range,y::Range,v)
 end
 gradient3by3(g::Gridded,weights::AbstractMatrix,retnan=true) =
     gradient3by3(g.x,g.y,g.v,weights,retnan)
+# Implementation using weights: drops pairs which don't work.
 function gradient3by3(x::Range,y::Range,v,weights::AbstractMatrix,retnan=true)
     nx, ny = length(x),length(y)
     dx = step(x)
