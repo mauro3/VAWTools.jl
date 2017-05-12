@@ -201,19 +201,20 @@ function bin_grid(v::Matrix, binsize_or_bins, mask=BitArray([]); binround=_binro
     _bin_grid_kernel(bins, nv, v, ginds)
 end
 @inbounds function _bin_grid_kernel(bins, nv, v, ginds)
+    # initialize output
     indices = Vector{Int}[]
     for b in bins
         ind = Int[]
         push!(indices, ind)
     end
+    # fill it
     for j=1:nv
         if (bins[2]-bins[1])>0
-            i = searchsortedfirst(bins, v[j])-1
+            i = searchsortedlast(bins, v[j])
         else
             # https://github.com/JuliaLang/julia/issues/18653
-            i = searchsortedfirst(collect(bins), v[j], rev=true)-1
+            i = searchsortedlast(collect(bins), v[j], rev=true)
         end
-        i = max(i,1) # TODO, this is a bit of a hack... otherwise if bins=0:10 and v[j]==0 -> i==0
         push!(indices[i], ginds[j])
     end
     return bins, indices
@@ -378,9 +379,14 @@ is used.
 """
 @enum Loc _noedge=0 left=1 right=2 lower=3 upper=4
 
+"Orientation of a line"
+@enum Orientation nohand=0 lefthand=1 righthand=2
+
 """
-One cell-edge of a regular gird of cells.  Arguably not the best
-datastructure for what is done below.
+One cell-edge of a regular gird of cells.
+
+TODO:
+Arguably not the best datastructure for what is done below.
 """
 immutable Edge
     i::Int # cell ind
@@ -413,26 +419,31 @@ function get_nodes(e::Edge)
 end
 
 """
+    orientation(e1::Edge) -> always left
     orientation(e1::Edge, e2::Edge)
 
 Return whether the cells are on left, right or both of the two cells.
+If not connected throws an error or return `_noedge`, depending on
+`throwerror` flag.
 
 """
-function orientation(e1::Edge, e2::Edge, throwerror=true)
+function orientation(e1::Edge, e2::Edge, throwerror=true)::Orientation
     n1,n2 = get_nodes(e1)
     m1,m2 = get_nodes(e2)
     if n2==m1
-        return right
+        return righthand
     elseif n1==m2
-        return left
+        return lefthand
     elseif n1==m1 || n2==m2
-        return _noedge
+        return nohand
     elseif throwerror
         error("The two edges:\n $e1 $e2 are not connected")
     else
-        return _noedge
+        return nohand
     end
 end
+orientation(e1::Edge)::Orientation = lefthand
+
 
 """
 A line made up of a continuous (and sorted) collection of edges.
@@ -452,31 +463,47 @@ Base.length(l::Line) = length(l.edges)
 
 Returns the orientation of a line: `left` means cell is on left of line.
 """
-orientation(l::Line) = orientation(l.edges)
-function orientation(l::Vector)
-    length(l)==1 && return _noedge # TODO what to do here?
+orientation(l::Line)::Orientation = orientation(l.edges)
+function orientation(l::Vector)::Orientation
+    if length(l)==0
+        error("Line has length 0")
+    end
+    if length(l)==1
+        # println("Line has length $(length(l)).  Too short to establish orientation.")
+        return orientation(l[1]) # returns `left`
+    end
     # establish orientation of first two segments
     ori = orientation(l[1],l[2])
     for i=3:length(l)
-        orientation(l[i-1],l[i])!=ori &&
-            error("Line not consistently oriented at edges: $(i-1), $i")
+        ori2 = orientation(l[i-1],l[i])
+        if ori2!=ori
+            println("""
+                    Line changes orientation between edge # $(i-2) and $i from $ori to $ori2.
+                    e0: $(l[i-2])
+                    e1: $(l[i-1])
+                    e2: $(l[i])
+                    """)
+            return _noedge
+        end
     end
     return ori
 end
 
 """
-    next_edge!(edges::Set{Edge}, edge::Edge)
+    next_edge!(edges::Set{Edge}, edge::Edge, testori::Orientation)
 
-Return an adjacent edge of input edge.  Pops returned edge off
-`edges`.  If no edge is found, return `Edge(-1,-1,nodege)`.
+Return an adjacent edge of input edge such that the orientation of the
+two edges is equal `testori`.  Pops returned edge off `edges`.  If no
+edge is found, return `Edge(-1,-1,nodege)`.
+
 """
-function next_edge!(edges::Set{Edge}, edge::Edge)
+function next_edge!(edges::Set{Edge}, edge::Edge, testori::Orientation)
     edge.loc==_noedge && error("Not a proper edge: $edge")
     locs = (left,right,lower,upper)
     for i=[0,-1,1],j=[0,-1,1]
         for loc in locs
             test_edge = Edge(edge.i+i,edge.j+j,loc)
-            if orientation(edge, test_edge,false)==left && (test_edge in edges)
+            if orientation(edge, test_edge,false)==testori && (test_edge in edges)
                 return pop!(edges, test_edge)
             end
         end
@@ -485,6 +512,61 @@ function next_edge!(edges::Set{Edge}, edge::Edge)
     return noedge
 end
 
+"""
+    get_edges_on_boundary(bands, bandi, binmat, landmask=nothing) -> es
+
+Return a list of sets of cell-edges which are at the boundary.
+
+    typeof(es) == Dict{Tuple{Int,Int},Set{Edge}}()
+
+which maps (bandnr,otherbandnr) => Set of edges
+
+"""
+function get_cells_on_boundary(bands, bandi, binmat, landmask=nothing)
+    dims = size(binmat)
+
+    if landmask!=nothing
+        # encode sea cells in binmat
+        binmat = copy(binmat)
+        binmat[(landmask.==0) & (binmat.==0)] = -1
+    end
+
+    # The boundaries of all bands:
+    # (bandnr,otherbandnr) => Set of edges
+    edges_at_boundaries = Dict{Tuple{Int,Int},Set{Edge}}()
+
+    # Loop to identify all boundary cells of each band and determine
+    # which cell-edges are on the boundary:
+    for (ib,bup) in enumerate(bands)
+        for I in bandi[ib]
+            i,j = ind2sub(dims, I)
+            loc = 1
+            # left-right
+            for ii=-1:2:1
+                if 1<=i+ii<=dims[1] # skip if outside of binmat
+                    iother = binmat[i+ii,j]
+                    if iother!=ib
+                        push!(get!(edges_at_boundaries, (ib, iother), Set{Edge}()),
+                              Edge(i,j,loc))
+                    end
+                end
+                loc+=1
+            end
+            # lower-upper
+            for jj=-1:2:1
+                if 1<=j+jj<=dims[2] # skip if outside of binmat
+                    iother = binmat[i,j+jj]
+                    if iother!=ib
+                        push!(get!(edges_at_boundaries, (ib, iother), Set{Edge}()),
+                              Edge(i,j,loc))
+                    end
+                end
+                loc+=1
+            end
+        end
+    end
+    return edges_at_boundaries
+end
 
 """
     calc_boundaries(bands, bandi, binmat, landmask=nothing)
@@ -511,40 +593,12 @@ function calc_boundaries(bands, bandi, binmat, landmask=nothing)
 
     # The boundaries of all bands:
     # (bandnr,otherbandnr) => Set of edges
-    boundaries_ = Dict{Tuple{Int,Int},Set{Edge}}()
-
-    # Loop to identify all boundary cells of each band and determine
-    # which cell-edges are on the boundary:
-    for (ib,bup) in enumerate(bands)
-        for I in bandi[ib]
-            i,j = ind2sub(dims, I)
-            loc = 1
-            # left-right
-            for ii=-1:2:1
-                iother = binmat[i+ii,j]
-                if iother!=ib
-                    push!(get!(boundaries_, (ib, iother), Set{Edge}()),
-                          Edge(i,j,loc))
-                end
-                loc+=1
-            end
-            # lower-upper
-            for jj=-1:2:1
-                iother = binmat[i,j+jj]
-                if iother!=ib
-                    push!(get!(boundaries_, (ib, iother), Set{Edge}()),
-                          Edge(i,j,loc))
-                end
-                loc+=1
-            end
-        end
-    end
-    # Sort the points and find breaks.
+    edges_at_boundaries = get_cells_on_boundary(bands, bandi, binmat, landmask)
 
     # bandnr => otherbandnr => Vector{Line}
     boundaries = [Dict{Int,Vector{Line}}() for i=1:length(bands)]
 
-    for ((band,otherband), edges) in boundaries_
+    for ((band,otherband), edges) in edges_at_boundaries
 
         # # delete:
         # band, otherband = 2,0
@@ -558,19 +612,27 @@ function calc_boundaries(bands, bandi, binmat, landmask=nothing)
             firstedge = first(edges)
             delete!(edges, firstedge)
             out = [Edge[], Edge[]]
-            for ii=1:2 # both directions
+            for ii=1:2 # first lefthand Orientation(1), then righthand Orientation(2)
                 curedge = firstedge
                 while curedge!=noedge
                     push!(out[ii], curedge)
-                    curedge = next_edge!(edges, curedge)
+                    curedge = next_edge!(edges, curedge, Orientation(ii))
                 end
             end
             prepend!(out[2], reverse(out[1][2:end]))
             # make sure the elevation band is on the line's left:
-            if orientation(out[2]) == right
+            ori = orientation(out[2])
+            if ori == righthand
                 push!(output, Line(reverse(out[2])))
-            else
+            elseif ori==lefthand
                 push!(output, Line(out[2]))
+            elseif ori==nohand
+                error("""
+                      Constructed line has not a consistent orientation.
+                      Band: $band
+                      Otherband: $otherband
+                      """
+                      )
             end
         end
         boundaries[band][otherband] = output
@@ -580,7 +642,7 @@ function calc_boundaries(bands, bandi, binmat, landmask=nothing)
 end
 
 """
-    calc_fluxdir_source(l::Line, ux, uy, window) -> fluxdir,ii,jj,fluxdirx,fluxdiry
+    calc_fluxdir_source(l::Line, ux, uy, window, bands) -> fluxdir,ii,jj,fluxdirx,fluxdiry
 
 Calculated the flux-direction on a Line by taking a running average
 over some part of it.  Also returns the flux to use and the upstream
@@ -596,7 +658,7 @@ Notes:
 - this is not 100% correct but probably close enough.
   - now the averaging is over all edges.  Arguably it could be done over cells?
 """
-function calc_fluxdir(l::Line, ux, uy, window, dx)
+function calc_fluxdir(l::Line, ux, uy, window, dx, bands)
     edges = l.edges
     ne = length(edges)
     # x,y flux-direction on the cell
@@ -638,23 +700,26 @@ function calc_fluxdir(l::Line, ux, uy, window, dx)
         i,j,loc = edges[I].i, edges[I].j, edges[I].loc
         ii[I],jj[I],fluxdir[I] =
             if loc==left
-                fx<0 ? (i,j,-fx*dx) : (i-1,j,-fx*dx)
+                fx<0 ? (i,j,fx*dx) : (i-1,j,fx*dx)
             elseif loc==right
-                fx<0 ? (i+1,j,fx*dx) : (i,j,fx*dx)
+                fx<0 ? (i+1,j,-fx*dx) : (i,j,-fx*dx)
             elseif loc==lower
-                fy<0 ? (i,j,-fy*dx) : (i,j-1,-fy*dx)
+                fy<0 ? (i,j,fy*dx) : (i,j-1,fy*dx)
             else #if loc==upper
-                fy<0 ? (i,j+1,fy*dx) : (i,j,fy*dx)
+                fy<0 ? (i,j+1,-fy*dx) : (i,j,-fy*dx)
             end
     end
-    return fluxdir,ii,jj,fluxdirx,fluxdiry
+    # for reverse ordered bands, need a sign flip
+    sig = sign(step(bands))
+
+    return sig*fluxdir,ii,jj,fluxdirx,fluxdiry
 end
 
 """
     calc_u(q1d, boundaries, thick, alpha, ux, uy, dx, mask, bands, lengths,
            flux_dir_window, window_frac=1.5,
            x=nothing, y=nothing) # these are only needed for plotting
-    -> u2d, u2d_at_bands, scaling-factors-1d, mask_u2d_at_bands
+    -> u2d, u2d_at_bands, scaling_factors_1d, mask_u2d_at_bands
 
 Calculates a 2D field of depth averaged ice flow speed `ubar` which has the
 same flux across elevation band boundaries as the supplied 1D flux
@@ -689,11 +754,11 @@ function calc_u(q1d, boundaries, u_trial, thick,
                 window_frac;
                 plotyes=false,
                 x=nothing, y=nothing)
-    ubar_, ubar, facs, mask_ubar = _calc_u(q1d, boundaries, u_trial, thick,
+    ubar_, ubar, facs, mask_ubar_ = _calc_u(q1d, boundaries, u_trial, thick,
                                     ux, uy, dx, mask, bands, lengths,
                                     flux_dir_window, # in [m]
                                     plotyes,x,y)
-    return boxcar(ubar_, Int((window_frac*maximum(lengths))÷dx)+1, mask_ubar, !mask), ubar, facs, mask_ubar
+    return boxcar(ubar_, Int((window_frac*maximum(lengths))÷dx)+1, mask_ubar_, !mask), ubar, facs, mask_ubar_
 end
 
 # this helper function is needed for type stability
@@ -722,7 +787,7 @@ function _calc_u(q1d, boundaries, u_trial, thick,
         js = Int[]
         for l in bb
             #@assert orientation(l)
-            ff, fi, fj, fx, fy = calc_fluxdir(l, ux, uy, Int(flux_dir_window÷dx), dx)
+            ff, fi, fj, fx, fy = calc_fluxdir(l, ux, uy, Int(flux_dir_window÷dx), dx, bands)
             # if plotyes
             #     quiver(x[fi],y[fj],fx,fy)
             # end
@@ -740,14 +805,13 @@ function _calc_u(q1d, boundaries, u_trial, thick,
         #@assert all(u.>=0) "$i, $ij, $(u_trial[ij]), $(ff[ij]), $(q_trial), $(q1d[i]), $(h_line[ij])"
         for (n,(i,j)) in enumerate(zip(is,js))
             if u[n]<0;
-                # This should not happen!
-                error("This should not happen!")
+                println("Flow speed<0: $(u[n]) at location ($i,$j).  This should not happen!")
                 u[n]=0
             end
             ubar[i,j] = u[n]
         end
     end
-    mask_ubar = mask & (!isnan(ubar)) # location of all cells for which `ubar` was calculated
+    mask_ubar_ = mask & (!isnan(ubar)) # location of all cells for which `ubar` was calculated
     ubar_ = copy(ubar)
     ubar_[isnan(ubar_)] = 0
     # if plotyes
@@ -755,5 +819,5 @@ function _calc_u(q1d, boundaries, u_trial, thick,
     #     imshow(ubar',origin="lower", extent=(x[1],x[end],y[1],y[end]),); colorbar(); clim(0,50)
     # end
 
-    return ubar_, ubar, facs, mask_ubar
+    return ubar_, ubar, facs, mask_ubar_
 end
