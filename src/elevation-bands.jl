@@ -742,7 +742,7 @@ function calc_u(q1d, boundaries, u_trial, thick,
                 plotyes=false,
                 x=nothing, y=nothing)
     ubar_, ubar, facs, mask_ubar = _calc_u(q1d, boundaries, u_trial, thick,
-                                    ux, uy, dx, mask, bands, lengths,
+                                    ux, uy, dx, mask, bands,
                                     flux_dir_window, # in [m]
                                            plotyes,x,y)
     # below type assertion is needed for type-stability ?!
@@ -755,15 +755,14 @@ function calc_u(q1d, boundaries, u_trial, thick,
                 plotyes=false,
                 x=nothing, y=nothing)
     ubar_, ubar, facs, mask_ubar_ = _calc_u(q1d, boundaries, u_trial, thick,
-                                    ux, uy, dx, mask, bands, lengths,
+                                    ux, uy, dx, mask, bands,
                                     flux_dir_window, # in [m]
                                     plotyes,x,y)
     return boxcar(ubar_, Int((window_frac*maximum(lengths))÷dx)+1, mask_ubar_, !mask), ubar, facs, mask_ubar_
 end
-
 # this helper function is needed for type stability
 function _calc_u(q1d, boundaries, u_trial, thick,
-                ux, uy, dx, mask, bands, lengths,
+                ux, uy, dx, mask, bands,
                 flux_dir_window,
                 plotyes,
                 x, y) # these are only needed for plotting
@@ -820,4 +819,29 @@ function _calc_u(q1d, boundaries, u_trial, thick,
     # end
 
     return ubar_, ubar, facs, mask_ubar_
+end
+
+"""
+    get_iv_boxcar_M(F, dem, mask, bands, bandi, lengths, iv_window_frac)
+
+Precalculate the boxcar operator for the IV calculation (this is the
+most expensive part).
+"""
+function get_iv_boxcar_M(F, dem, mask, bands, bandi, lengths, iv_window_frac)
+    ux,uy = (-).(gradient3by3(dem, mask))
+    binmat = VAWTools.bins2matrix(dem, bands, bandi)
+    boundaries = VAWTools.calc_boundaries(bands,bandi,binmat)
+    q1d = ones(bands)
+    u_trial = ones(dem.v)
+    thick = u_trial
+    dx = step(dem.x)
+    flux_dir_window = 2
+    ubar_, ubar, facs, mask_ubar_ = _calc_u(q1d, boundaries, u_trial, thick,
+                                            ux, uy, dx, mask,
+                                            bands,
+                                            flux_dir_window,
+                                            false,nothing,nothing)
+
+    return VAWTools.boxcar_matrix(F, Int((iv_window_frac*maximum(lengths))÷dx)+1, mask_ubar_, !mask),
+           boundaries, ux, uy
 end

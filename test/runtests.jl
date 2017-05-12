@@ -633,7 +633,7 @@ plotyes=false
 x=nothing
 y=nothing
 ubar_, ubar, facs, mask_ubar_ = VAWTools._calc_u(q1d, boundaries, u_trial, thick,
-                                                ux, uy, dx, mask, bands, lengths,
+                                                ux, uy, dx, mask, bands,
                                                 flux_dir_window, # in [m]
                                                 plotyes,x,y)
 
