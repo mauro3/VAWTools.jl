@@ -83,6 +83,16 @@ tfn2 = tempfn(".agr")
 write_agr(g2, tfn2)
 @test sha(tfn1)==sha(tfn2)
 
+# reading from io thingies
+io = open("testfiles/wiki.agr", "r")
+g2 = VAWTools.read_agr(io)
+close(io)
+g1 = VAWTools.read_agr("testfiles/wiki.agr")
+@test g1.x==g2.x
+@test g1.y==g2.y
+@test g1.midpoint==g2.midpoint
+
+
 ## RasterIO agr reading
 g1 = VAWTools.read_agr("testfiles/wiki.agr")
 println("Expected output: ERROR 1: ERROR - failed to load SRS ...")
@@ -536,7 +546,7 @@ binmat = VAWTools.bins2matrix(g, bands, bandi)
 
 xx,yy = -50:11:23, 900.0:7:1200
 othergrid = Gridded(xx, yy, rand(length(xx),length(yy)))
-bandii = VAWTools.bandi_for_other_grid(bands, binmat, g, othergrid)
+bandii = VAWTools.bandi_for_other_grid(bands, bandi, binmat, g, othergrid)
 bandii2 = VAWTools.bandi_for_other_grid(bands, bandi, g, othergrid)
 @test bandii==bandii2
 

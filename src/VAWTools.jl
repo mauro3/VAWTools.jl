@@ -391,6 +391,12 @@ end
 
 """Check if .bin file nor not"""
 isbin_file(fn::AbstractString) = splitext(fn)[2]==".bin"
+function isbin_file(fn::IO)
+    f = fn.name
+    @assert f[1:6]=="<file "
+    isbin_file(f[7:end-1])
+end
+
 
 """Read a Ascii grid.
 https://en.wikipedia.org/wiki/Esri_grid
@@ -404,20 +410,27 @@ NA -- replace the fill value with this.  Defaults to use NaN.
 Out:
 Gridded
 """
-function read_agr(fn::AbstractString, T=Float32; NA=convert(T,NaN))
-    Gridded(_read_agr(fn::AbstractString, T, NA), NA=NA)::Gridded{T}
+function read_agr(fl, T=Float32; NA=convert(T,NaN))
+    Gridded(_read_agr(fl, T, NA), NA=NA)::Gridded{T}
 end
 
-function _read_agr(fn::AbstractString, T=Float32, NA=nothing)
-    if !isfile(fn)
-        error("File $fn does not exist!")
+function _read_agr(fl::AbstractString, T=Float32, NA=nothing)
+    if !isfile(fl)
+        error("File $fl does not exist!")
     end
-    if isbin_file(fn)
+    io = open(fl, "r")
+    out = _read_agr(io, T, NA)
+    close(io)
+    return out
+end
+
+function _read_agr(io::IO, T=Float32, NA=nothing)
+    if isbin_file(io)
         toT = (io,T) -> convert(T, read(io, Float32))
     else
         toT = (io,T) -> parse(T, split(readline(io))[2])
     end
-    open(fn, "r") do io
+
         local va::Matrix{T}
         # read header
         # nc = toT(io)::Int
@@ -432,7 +445,7 @@ function _read_agr(fn::AbstractString, T=Float32, NA=nothing)
         yll = toT(io,T)
         dx = toT(io,T)
         fill = toT(io,T)
-        if isbin_file(fn)
+        if isbin_file(io)
             # read extra header
             extra_header = read(io, Float32, 6)
             # read values
@@ -460,9 +473,8 @@ function _read_agr(fn::AbstractString, T=Float32, NA=nothing)
         if NA!=nothing && fill!=NA
             fill = _refill!(va, fill, NA)
         end
-        # make a AGR data structure
-        AGR(va, nc, nr, xll, yll, dx, fill, extra_header)
-    end
+    # make a AGR data structure
+    AGR(va, nc, nr, xll, yll, dx, fill, extra_header)
 end
 # A function barrier is needed, thus this helper function:
 function _refill!(a::Array, oldfill, newfill)

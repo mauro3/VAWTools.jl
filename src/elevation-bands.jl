@@ -327,9 +327,10 @@ end
 
 
 """
-    bandi_for_other_grid(binmat, g::Gridded, othergrid::Gridded, othermask=trues(size(othergrid.v))
-    bandi_for_other_grid(bands, bandi, g::Gridded, othergrid::Gridded,
-                         othermask=trues(size(othergrid.v)))
+    bandi_for_other_grid(bands, bandi, binmat, g::Gridded,
+                         othergrid::Gridded, othermask=trues(size(othergrid.v))
+    bandi_for_other_grid(bands, bandi, g::Gridded,
+                         othergrid::Gridded, othermask=trues(size(othergrid.v)))
 
 Returns vector of indices (bandi) to map a different grid onto the
 bands encoded in `binmat` (or `bands, bandi`) and grid `g`.  It only
@@ -339,12 +340,13 @@ also be given.  Return:
 
     bandi
 """
-function bandi_for_other_grid(bands, bandi::Vector{Vector{Int}}, g::Gridded, othergrid::Gridded,
-                              othermask=trues(size(othergrid.v)))
+function bandi_for_other_grid(bands, bandi::Vector{Vector{Int}}, g::Gridded,
+                              othergrid::Gridded, othermask=trues(size(othergrid.v)))
     binmat=bins2matrix(g, bands, bandi)
-    bandi_for_other_grid(bands, binmat, g, othergrid, othermask)
+    bandi_for_other_grid(bands, bandi, binmat, g, othergrid, othermask)
 end
-function bandi_for_other_grid(bands, binmat::Matrix{Int}, g::Gridded, othergrid::Gridded, othermask=trues(size(othergrid.v)) )
+function bandi_for_other_grid(bands, bandi, binmat::Matrix{Int}, g::Gridded,
+                              othergrid::Gridded, othermask=trues(size(othergrid.v)) )
     og = othergrid
     @assert size(othergrid)==size(othermask)
     if g.x!=og.x || g.y!=og.y
