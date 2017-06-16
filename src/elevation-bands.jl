@@ -40,9 +40,6 @@ function make_1Dglacier(dem::Gridded, binsize_or_bins, glaciermask=BitArray([]);
         glaciermask[[1,end],:] = false
         glaciermask[:,[1,end]] = false
     end
-    # due to a limitation in `absslope`:
-    @assert all(glaciermask[[1,end],:].==false)
-    @assert all(glaciermask[:,[1,end]].==false)
 
     # Smooth dem to get smooth alpha, smoother bands.  This is in
     # particular important when there is cross-flow bumpiness, such as

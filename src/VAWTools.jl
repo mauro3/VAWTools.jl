@@ -389,12 +389,15 @@ end
 # File readers
 ##############
 
-"""Check if .bin file nor not"""
+"""
+Check if .bin file nor not.  With IO types this may not work 100%.
+"""
 isbin_file(fn::AbstractString) = splitext(fn)[2]==".bin"
 function isbin_file(fn::IO)
     f = fn.name
-    @assert f[1:6]=="<file "
-    isbin_file(f[7:end-1])
+    f = strip(f, ['<','>']) # often looks like "<file asdf.ext>"
+    f = strip(f)
+    isbin_file(f)
 end
 
 
@@ -463,7 +466,7 @@ function _read_agr(io::IO, T=Float32, NA=nothing)
             # read values
             tmp = split(readstring(io))
             if length(tmp)!=nc*nr
-                error("Something's wrong with the file.  It should contain $(nc*nr) values but only has $(length(tmp))")
+                error("Something's wrong with the file/stream $io.  It should contain $(nc*nr) values but has $(length(tmp))")
             end
             for i=1:nr, j=1:nc
                 va[i,j] = parse(T, tmp[(i-1)*nc + j])
@@ -934,15 +937,15 @@ inpoly(p, poly::Matrix) = isodd(windnr(p,poly))
 
 Absolute value of slope angle (by finite differences)
 
-- Averaged over 3x3 points.
-- no slope is calculated for the outermost points
+- uses a 3x3 points stencil.
+- on outermost points uses one-sided stencil
 
 In:
 - gridded elevation set
 Out:
 - slope angle (rad)
 
-Note: slope and angle are very similar up to about ~0.4
+Note: slope and angle are very similar up to about ~0.4 or 20deg
 
 TODO:
 - allow only using points inside a mask
@@ -955,6 +958,37 @@ function absslope(x::Range,y::Range,v)
     for j=2:ny-1, i=2:nx-1
         dvx = ((v[i+1,j+1]+2*v[i+1,j]+v[i+1,j-1])-(v[i-1,j+1]+2*v[i-1,j]+v[i-1,j-1]))/(8*dx)
         dvy = -((v[i-1,j-1]+2*v[i,j-1]+v[i+1,j-1])-(v[i-1,j+1]+2*v[i,j+1]+v[i+1,j+1]))/(8*dx)
+        alphas[i,j] = atan(sqrt(dvx^2+dvy^2))
+    end
+    # on edge and corners use one-sided f-d
+    for j=[1,ny], i=1:nx
+        if i==1
+            dvx = (v[i+1,j]-v[i,j])/dx
+        elseif i==nx
+            dvx = (v[i,j]-v[i-1,j])/dx
+        else
+            dvx = (v[i+1,j]-v[i-1,j])/(2*dx)
+        end
+        if j==1
+            dvy = (v[i,j+1]-v[i,j])/dx
+        else
+            dvy = (v[i,j]-v[i,j-1])/dx
+        end
+        alphas[i,j] = atan(sqrt(dvx^2+dvy^2))
+    end
+    for j=1:ny, i=[1,nx]
+        if i==1
+            dvx = (v[i+1,j]-v[i,j])/dx
+        else
+            dvx = (v[i,j]-v[i-1,j])/dx
+        end
+        if j==1
+            dvy = (v[i,j+1]-v[i,j])/dx
+        elseif j==ny
+            dvy = (v[i,j]-v[i,j-1])/dx
+        else
+            dvy = (v[i,j+1]-v[i,j-1])/(2*dx)
+        end
         alphas[i,j] = atan(sqrt(dvx^2+dvy^2))
     end
     return alphas
