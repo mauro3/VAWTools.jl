@@ -47,19 +47,16 @@ function make_1Dglacier(dem::Gridded, binsize_or_bins, glaciermask=BitArray([]);
     if window_dem_smooth>0
         dem = deepcopy(dem)
         dx = step(dem.x)
-        # TODO: should smoothing only happen over glacier?  But then
-        # absslope does not work.
         fillmask = dem.v.!=FILL
-        dem.v[:] = boxcar(dem.v, round(Int,window_dem_smooth/dx), fillmask)
+        mask = fillmask & glaciermask
+        dem.v[:] = boxcar(dem.v, round(Int,window_dem_smooth/dx), mask, !mask)
         dem.v[!fillmask] = FILL
-    else
-        fillmask = dem.v.!=FILL
     end
     # no FILL inside glaciermask
     @assert !any(dem.v[glaciermask].==FILL)
 
     # 2D slopes
-    alpha2d = absslope(dem)
+    alpha2d = absslope(dem, glaciermask)
 
     bands, bandi = bin_grid(dem, binsize_or_bins, glaciermask, binround=binround)
     bandsize = step(bands)

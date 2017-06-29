@@ -1275,7 +1275,7 @@ end
 Boxcar filter.  The two argument call ignores NaNs.  The three & four
 argument call uses weights instead of NaNs, it can be a lot faster.
 
-For the weights it may be faster to use non Bool arrays or BitArrays,
+For the weights it may be faster to use non-Bool arrays nor BitArrays,
 say Int8.  Note that even NaNs where weight==0 will poison the result!
 
 No average is calculated for points where dropmask==true, instead
