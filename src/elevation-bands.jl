@@ -208,6 +208,7 @@ end
     for j=1:nv
         if (bins[2]-bins[1])>0
             i = searchsortedlast(bins, v[j])
+            i = i==0 ? 1 : i # if smaller then add to lowest bin
         else
             # https://github.com/JuliaLang/julia/issues/18653
             i = searchsortedlast(collect(bins), v[j], rev=true)
@@ -263,24 +264,29 @@ Input:
 - bandi -- as returned by bin_grid
 - field -- the field, either a Matrix or a Gridded
 - fn -- the function to do the reduction with.  Default==mean
+- fill -- fill value, if set, ignore those points
 
 Output
 - the value of the field on the bands
 """
-function map_onto_bands(bandi, field::Matrix, fn=mean, fill=NaN)
+function map_onto_bands(bandi, field::Matrix, fn=mean, fill=nothing)
     resT = typeof(fn(field[bandi[1]])) # to get result type
     out = zeros(resT, length(bandi))
     for i in 1:length(bandi)
-        # drop any with fill values
-        if any(isequal(field[bandi[i]],fill))
-            out[i] = fill
-        else
-            out[i] = fn(field[bandi[i]])
+        count = 0
+        for j=1:length(bandi[i])
+            val = field[bandi[i][j]]
+            if val!=fill
+                # only use the ones which have no fill
+                out[i] += val
+                count+=1
+            end
         end
+        out[i] /=count
     end
     return out
 end
-map_onto_bands(bandi, field::Gridded, fn=mean) = map_onto_bands(bandi, field.v, fn=mean)
+map_onto_bands(bandi, field::Gridded, fn=mean, fill=NaN) = map_onto_bands(bandi, field.v, mean, fill)
 
 """
     map_back_to_2D(dims2d, bandi, field1d)

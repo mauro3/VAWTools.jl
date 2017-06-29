@@ -4,3 +4,5 @@ StatsBase
 RasterIO
 Proj4
 Interpolations
+GeoInterface
+Shapefile

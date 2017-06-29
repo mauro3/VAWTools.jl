@@ -1,4 +1,4 @@
-#__precompile__() # RasterIO is not pre-compiled
+__precompile__() # RasterIO is not pre-compiled
 
 module VAWTools
 
@@ -157,7 +157,7 @@ Be sure to be clear whether x corresponds to cell centers or boundaries.
 """
 immutable Gridded1d{T} <:  AGridded{T}
     x::FloatRange{Float64}
-    midpoint::Bool  # if true, the x is cell midpoint, otherwise the lower bound
+    midpoint::Bool  # if true, the x is cell midpoint, otherwise the bound closer to x[1]
     v::Vector{T} # values
     err::Vector{T}  # error of values
     function Gridded1d(x,mp,v,err)
@@ -767,6 +767,40 @@ function read_rasterio(fn::AbstractString, T=Float32; NA=convert(T,NaN))
             true, flipdim(va,2)), proj4
 end
 
+## Shapefiles
+import Shapefile, GeoInterface
+
+"""
+    read_shapefile_poly(filename)
+
+Reads a shapefile and returns a list of the polygons it contains.
+"""
+function read_shapefile_poly(fln)
+    shp = open(fln) do fd
+        read(fd, Shapefile.Handle)
+    end
+    outt = []
+    for ii =1:length(shp.shapes)
+        poly = shp.shapes[1]
+        np = length(poly.points)
+        pp = poly.parts
+        push!(pp, np)
+
+        out = zeros(2,np+length(pp)-2)
+        extra_j = 0
+        for i = 2:length(pp)
+            for j = (pp[i-1]+1:pp[i])+extra_j
+                out[:,j] = GeoInterface.coordinates(poly.points[j-extra_j])
+            end
+            if i!=length(pp)
+                out[:,pp[i]+extra_j+1] = out[:,1]
+                extra_j += 1
+            end
+        end
+        push!(outt, out)
+    end
+    return outt
+end
 
 ## Misc helpers
 ###############
@@ -800,7 +834,11 @@ end
 """
     transform_proj(xy or xyz, from, to)
 
-Transform between projections.  Uses Proj4.jl
+Transform between projections.  Uses Proj4.jl.  Example:
+
+    longlat = "+proj=longlat"
+    utm56 = "+proj=utm +zone=56 +south"
+    transform_proj([6e3,197e3], utm56, longlat)
 
 Input:
 - xy or xyz vector, matrix or trajectory of input points (x,y) or (x,y,z)
@@ -823,12 +861,40 @@ function transform_proj(tr::Traj, from, to)
     end
 end
 
+######
+# Distances
+######
+"""
+    dist(x1,y1,x2,y2)
 
+Cartesian distance
+"""
+dist(x1,y1,x2,y2) = sqrt((x1-x2)^2 + (y1-y2)^2)
+
+"""
+    dist_longlat(lon1,lat1,lon2,lat2,R=6373)
+
+Distance on a sphere (default earth size).
+"""
+function dist_longlat(lon1,lat1,lon2,lat2,R=6373) # the radius of the Earth
+    # http://andrew.hedges.name/experiments/haversine/
+
+    dlon = deg2rad(lon2 - lon1)
+    dlat = deg2rad(lat2 - lat1)
+    lat1 = deg2rad(lat1)
+    lat2 = deg2rad(lat2)
+    a = (sin(dlat/2))^2 + cos(lat1) * cos(lat2) * (sin(dlon/2))^2
+    c = 2 * atan2( sqrt(a), sqrt(1-a) )
+    return R * c
+end
+
+
+
+########
 """
 Convert int to string and pad with 0 to get to len
 """
-int2str(i, len) = @sprintf "%05d" i
-
+int2str5(i) = @sprintf "%05d" i
 
 """
 Represents an array all filled with one value.
@@ -932,8 +998,8 @@ inpoly(p, poly::Matrix) = isodd(windnr(p,poly))
 # https://github.com/helenchg/PolygonClipping.jl/blob/1fc74ab797c6585795283749b7c4cc9cb2000243/src/PolygonClipping.jl#L139
 
 """
-    absslope(g::Gridded)
-    absslope(x::Range,y::Range,v)
+    absslope(g::Gridded,weights::AbstractMatrix=UniformArray{Bool,2}(true),retnan=false)
+    absslope(x::Range,y::Range,v,weights::AbstractMatrix=UniformArray{Bool,2}(true),retnan=true)
 
 Absolute value of slope angle (by finite differences)
 
@@ -946,53 +1012,61 @@ Out:
 - slope angle (rad)
 
 Note: slope and angle are very similar up to about ~0.4 or 20deg
-
-TODO:
-- allow only using points inside a mask
 """
-absslope(g::Gridded) = absslope(g.x,g.y,g.v)
-function absslope(x::Range,y::Range,v)
-    nx, ny = length(x),length(y)
-    dx = step(x)
-    alphas = zeros(Float64, nx, ny)
-    for j=2:ny-1, i=2:nx-1
-        dvx = ((v[i+1,j+1]+2*v[i+1,j]+v[i+1,j-1])-(v[i-1,j+1]+2*v[i-1,j]+v[i-1,j-1]))/(8*dx)
-        dvy = -((v[i-1,j-1]+2*v[i,j-1]+v[i+1,j-1])-(v[i-1,j+1]+2*v[i,j+1]+v[i+1,j+1]))/(8*dx)
-        alphas[i,j] = atan(sqrt(dvx^2+dvy^2))
+absslope(g::Gridded,weights::AbstractMatrix=UniformArray{Bool,2}(true),retnan=true) =
+    absslope(g.x,g.y,g.v,weights,retnan)
+function absslope(x::Range,y::Range,v,weights::AbstractMatrix=UniformArray{Bool,2}(true),retnan=true)
+    dvx,dvy = gradient3by3(x,y,v,weights,retnan)
+    for i in eachindex(dvx)
+        dvx[i] = atan(sqrt(dvx[i]^2+dvy[i]^2))
     end
-    # on edge and corners use one-sided f-d
-    for j=[1,ny], i=1:nx
-        if i==1
-            dvx = (v[i+1,j]-v[i,j])/dx
-        elseif i==nx
-            dvx = (v[i,j]-v[i-1,j])/dx
-        else
-            dvx = (v[i+1,j]-v[i-1,j])/(2*dx)
-        end
-        if j==1
-            dvy = (v[i,j+1]-v[i,j])/dx
-        else
-            dvy = (v[i,j]-v[i,j-1])/dx
-        end
-        alphas[i,j] = atan(sqrt(dvx^2+dvy^2))
-    end
-    for j=1:ny, i=[1,nx]
-        if i==1
-            dvx = (v[i+1,j]-v[i,j])/dx
-        else
-            dvx = (v[i,j]-v[i-1,j])/dx
-        end
-        if j==1
-            dvy = (v[i,j+1]-v[i,j])/dx
-        elseif j==ny
-            dvy = (v[i,j]-v[i,j-1])/dx
-        else
-            dvy = (v[i,j+1]-v[i,j-1])/(2*dx)
-        end
-        alphas[i,j] = atan(sqrt(dvx^2+dvy^2))
-    end
-    return alphas
+    dvx
 end
+
+## Old, probably faster implementation:
+# absslope(g::Gridded) = absslope(g.x,g.y,g.v)
+# function absslope(x::Range,y::Range,v)
+#     nx, ny = length(x),length(y)
+#     dx = step(x)
+#     alphas = zeros(Float64, nx, ny)
+#     for j=2:ny-1, i=2:nx-1
+#         dvx =  ((v[i+1,j+1]+2*v[i+1,j]+v[i+1,j-1])-(v[i-1,j+1]+2*v[i-1,j]+v[i-1,j-1]))/(8*dx)
+#         dvy = -((v[i-1,j-1]+2*v[i,j-1]+v[i+1,j-1])-(v[i-1,j+1]+2*v[i,j+1]+v[i+1,j+1]))/(8*dx)
+#         alphas[i,j] = atan(sqrt(dvx^2+dvy^2))
+#     end
+#     # on edge and corners use one-sided f-d
+#     for j=[1,ny], i=1:nx
+#         if i==1
+#             dvx = (v[i+1,j]-v[i,j])/dx
+#         elseif i==nx
+#             dvx = (v[i,j]-v[i-1,j])/dx
+#         else
+#             dvx = (v[i+1,j]-v[i-1,j])/(2*dx)
+#         end
+#         if j==1
+#             dvy = (v[i,j+1]-v[i,j])/dx
+#         else
+#             dvy = (v[i,j]-v[i,j-1])/dx
+#         end
+#         alphas[i,j] = atan(sqrt(dvx^2+dvy^2))
+#     end
+#     for j=1:ny, i=[1,nx]
+#         if i==1
+#             dvx = (v[i+1,j]-v[i,j])/dx
+#         else
+#             dvx = (v[i,j]-v[i-1,j])/dx
+#         end
+#         if j==1
+#             dvy = (v[i,j+1]-v[i,j])/dx
+#         elseif j==ny
+#             dvy = (v[i,j]-v[i,j-1])/dx
+#         else
+#             dvy = (v[i,j+1]-v[i,j-1])/(2*dx)
+#         end
+#         alphas[i,j] = atan(sqrt(dvx^2+dvy^2))
+#     end
+#     return alphas
+# end
 
 """
     gradient3by3(g::Gridded)
@@ -1010,42 +1084,39 @@ In:
 - gridded elevation set or x,y,z
 Out:
 - dvx,dvy
+
+Reference: gradient3by3_fast
 """
-gradient3by3(g::Gridded) = gradient3by3(g.x,g.y,g.v)
-function gradient3by3(x::Range,y::Range,v)
-    nx, ny = length(x),length(y)
-    dx = step(x)
-    dvx = zeros(Float64, nx, ny)
-    dvy = zeros(Float64, nx, ny)
-    for j=2:ny-1, i=2:nx-1
-        dvx[i,j] =  ((v[i+1,j+1]+2*v[i+1,j]+v[i+1,j-1]) - (v[i-1,j+1]+2*v[i-1,j]+v[i-1,j-1]))/(8*dx)
-        dvy[i,j] = -((v[i-1,j-1]+2*v[i,j-1]+v[i+1,j-1]) - (v[i-1,j+1]+2*v[i,j+1]+v[i+1,j+1]))/(8*dx)
-    end
-    return dvx, dvy
-end
-gradient3by3(g::Gridded,weights::AbstractMatrix,retnan=true) =
+gradient3by3(g::Gridded,weights::AbstractMatrix=UniformArray{Bool,2}(true),retnan=true) =
     gradient3by3(g.x,g.y,g.v,weights,retnan)
 # Implementation using weights: drops pairs which don't work.
-function gradient3by3(x::Range,y::Range,v,weights::AbstractMatrix,retnan=true)
+function gradient3by3(x::Range,y::Range,v,weights::AbstractMatrix=UniformArray{Bool,2}(true),retnan=true)
     nx, ny = length(x),length(y)
     dx = step(x)
     dvx = zeros(Float64, nx, ny)
     dvy = zeros(Float64, nx, ny)
 
+    # local weights
+    lw = zeros(Float64,3,3)
     f = [1,2,1]
-    for j=2:ny-1, i=2:nx-1
+    for j=1:ny, i=1:nx
+        lw[:] = 0
+        for jj=max(1,j-1):min(ny,j+1), ii=max(1,i-1):min(nx,i+1)
+            lw[ii-i+2,jj-j+2] = weights[ii,jj]
+        end
+
         # xdir
         n = 0
         for k=-1:1
-            if weights[i+1,j+k]!=0 && weights[i-1,j+k]!=0
+            if lw[3,k+2]!=0 && lw[1,k+2]!=0
                 # centered difference
                 dvx[i,j] += (v[i+1,j+k]-v[i-1,j+k])/(2*dx)*f[k+2]
                 n+=1*f[k+2]
-            elseif weights[i,j+k]!=0 && weights[i-1,j+k]!=0
+            elseif lw[2,k+2]!=0 && lw[1,k+2]!=0
                 # right difference
                 dvx[i,j] += (v[i,j+k]-v[i-1,j+k])/dx*f[k+2]
                 n+=1*f[k+2]
-            elseif weights[i+1,j+k]!=0 && weights[i,j+k]!=0
+            elseif lw[3,k+2]!=0 && lw[2,k+2]!=0
                 # left difference
                 dvx[i,j] += (v[i+1,j+k]-v[i,j+k])/dx*f[k+2]
                 n+=1*f[k+2]
@@ -1063,15 +1134,15 @@ function gradient3by3(x::Range,y::Range,v,weights::AbstractMatrix,retnan=true)
         # ydir
         n = 0
         for k=-1:1
-            if weights[i+k,j+1]!=0 && weights[i+k,j-1]!=0
+            if lw[k+2,3]!=0 && lw[k+2,1]!=0
                 # centered difference
                 dvy[i,j] += (v[i+k,j+1]-v[i+k,j-1])/(2*dx)*f[k+2]
                 n+=1*f[k+2]
-            elseif weights[i+k,j+1]!=0 && weights[i+k,j]!=0
+            elseif lw[k+2,3]!=0 && lw[k+2,2]!=0
                 # right difference
                 dvy[i,j] += (v[i+k,j+1]-v[i+k,j])/dx*f[k+2]
                 n+=1*f[k+2]
-            elseif weights[i+k,j]!=0 && weights[i+k,j-1]!=0
+            elseif lw[k+2,2]!=0 && lw[k+2,1]!=0
                 # left difference
                 dvy[i,j] += (v[i+k,j]-v[i+k,j-1])/dx*f[k+2]
                 n+=1*f[k+2]
@@ -1089,6 +1160,21 @@ function gradient3by3(x::Range,y::Range,v,weights::AbstractMatrix,retnan=true)
     end
     return dvx, dvy
 end
+
+"Faster than gradient3by3 but does not deal with weights nor the edge."
+gradient3by3_fast(g::Gridded) = gradient3by3_fast(g.x,g.y,g.v)
+function gradient3by3_fast(x::Range,y::Range,v)
+    nx, ny = length(x),length(y)
+    dx = step(x)
+    dvx = zeros(Float64, nx, ny)
+    dvy = zeros(Float64, nx, ny)
+    for j=2:ny-1, i=2:nx-1
+        dvx[i,j] =  ((v[i+1,j+1]+2*v[i+1,j]+v[i+1,j-1]) - (v[i-1,j+1]+2*v[i-1,j]+v[i-1,j-1]))/(8*dx)
+        dvy[i,j] = -((v[i-1,j-1]+2*v[i,j-1]+v[i+1,j-1]) - (v[i-1,j+1]+2*v[i,j+1]+v[i+1,j+1]))/(8*dx)
+    end
+    return dvx, dvy
+end
+
 
 ##############
 # Bands
