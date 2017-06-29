@@ -96,12 +96,12 @@ g1 = VAWTools.read_agr("testfiles/wiki.agr")
 ## RasterIO agr reading
 g1 = VAWTools.read_agr("testfiles/wiki.agr")
 println("Expected output: ERROR 1: ERROR - failed to load SRS ...")
-g2,proj4 = VAWTools.read_rasterio("testfiles/wiki.agr")
-@test isequal(g1.v,g2.v)
-@test g1.x==g2.x
-@test g1.y==g2.y
-@test g1.midpoint==g2.midpoint
-@test proj4==""
+# g2,proj4 = VAWTools.read_rasterio("testfiles/wiki.agr")
+# @test isequal(g1.v,g2.v)
+# @test g1.x==g2.x
+# @test g1.y==g2.y
+# @test g1.midpoint==g2.midpoint
+# @test proj4==""
 
 # write and read back binary:
 tfn3 = tempfn(".bin")
@@ -129,12 +129,12 @@ g1 = VAWTools._read_agr("testfiles/wiki.agr")
 gg = Gridded(g1)
 @test isequal(VAWTools.AGR(gg, NA_agr=-9999).v, g1.v)
 
-# RasterIO geotiff
-gt,proj4 = VAWTools.read_rasterio("testfiles/small_world.tif")
-@test proj4=="+proj=longlat +datum=WGS84 +no_defs" || proj4==""
-@test gt.x==-179.55:0.9:179.55
-@test gt.y==-89.55:0.9:89.55
-@test isa(gt.v, Array{Float32,2})
+# # RasterIO geotiff
+# gt,proj4 = VAWTools.read_rasterio("testfiles/small_world.tif")
+# @test proj4=="+proj=longlat +datum=WGS84 +no_defs" || proj4==""
+# @test gt.x==-179.55:0.9:179.55
+# @test gt.y==-89.55:0.9:89.55
+# @test isa(gt.v, Array{Float32,2})
 
 # Trajectory
 @test_throws AssertionError Traj(1:5, 6:11, 0.0:5.0)
