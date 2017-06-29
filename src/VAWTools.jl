@@ -249,7 +249,11 @@ Base.length(t::Traj) = length(t.x)
 #     end
 #     nothing
 # end
-"Splits trajectory into several"
+"""
+    split_traj!{T<:Traj}(t::T, dist)
+
+Splits trajectory into several
+"""
 function split_traj!{T<:Traj}(t::T, dist)
     ii = 1
     empty!(t.splits)
@@ -707,6 +711,18 @@ function concat_poly(mpoly::Vector)
     end
     push!(splits, totsize+1)
     return bigpoly, splits
+end
+
+"Finds splitting points in a big-poly"
+function find_poly_splits(bigpoly::Matrix)
+    splits = Int[]
+    p1 = bigpoly[:,1]
+    for i=1:size(bigpoly,2)
+        if p1==bigpoly[:,i]
+            push!(splits,i)
+        end
+    end
+    splits
 end
 
 "Split up concatenated polygon."

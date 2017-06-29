@@ -26,27 +26,19 @@ Returns:
 - dem -- the used DEM, a possibly smoothed version of the input DEM
 - alpha2d -- slopes at each point of `dem`
 """
-function make_1Dglacier(dem::Gridded, binsize_or_bins, glaciermask=BitArray([]);
+function make_1Dglacier(dem::Gridded, binsize_or_bins, glaciermask=trues(size(dem.v));
                         binround=_binround(binsize_or_bins),
                         window_dem_smooth=0.0,
                         window_width_smooth=0.0,
                         alpha_min=deg2rad(0.4),
                         alpha_max=deg2rad(60.0),
                         FILL=-9999999.0)
-
-    # # set mask at edges to zero
-    if glaciermask==BitArray([])
-        glaciermask = trues(size(dem.v))
-        glaciermask[[1,end],:] = false
-        glaciermask[:,[1,end]] = false
-    end
-
+    dx = step(dem.x)
     # Smooth dem to get smooth alpha, smoother bands.  This is in
     # particular important when there is cross-flow bumpiness, such as
     # on Uaar.  However, it can also be bad.  YMMV, check!
     if window_dem_smooth>0
         dem = deepcopy(dem)
-        dx = step(dem.x)
         fillmask = dem.v.!=FILL
         mask = fillmask & glaciermask
         dem.v[:] = boxcar(dem.v, round(Int,window_dem_smooth/dx), mask, !mask)
@@ -95,7 +87,12 @@ function make_1Dglacier(dem::Gridded, binsize_or_bins, glaciermask=BitArray([]);
     if abs(totalarea-sum(areas))>1.0
         error("Something's amiss, sum of area of bands $(sum(areas)) not equal total area $totalarea,")
     end
-    box_diag = sqrt((dem.x[end]-dem.x[1])^2 + (dem.y[end]-dem.y[1])^2)
+    # check band length against diagonal
+    tmp = sum(glaciermask,2)
+    xextent = (findlast(tmp.>0)-findfirst(tmp.>0))*dx
+    tmp = sum(glaciermask,1)
+    yextent = (findlast(tmp.>0)-findfirst(tmp.>0))*dx
+    box_diag = sqrt(xextent^2 + yextent^2)
     if abs(sum(lengths)-box_diag)/box_diag>0.4
         warn("Glacier length from might be wrong. Band-length: $(sum(lengths)/1e3)km, bounding-box diag: $(box_diag/1e3)km")
     end
