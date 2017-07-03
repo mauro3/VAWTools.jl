@@ -6,7 +6,8 @@
 
 export map_onto_bands, make_1Dglacier, map_back_to_2D, map_back_to_2D!
 
-_binround(binsize_or_bins) = -floor(Int, log10(binsize_or_bins))
+_binround(binsize::Number) = -floor(Int, log10(abs(binsize)))
+_binround(binsize) = 0
 
 """
     make_1Dglacier(dem::Gridded, binsize_or_bins, glaciermask=BitArray([]);
@@ -20,7 +21,7 @@ _binround(binsize_or_bins) = -floor(Int, log10(binsize_or_bins))
 Makes a 1D glacier from a 2D DEM by using Huss' elevation band trick.
 
 Returns:
-- bands -- elevation bands
+- bands -- elevation bands.  The i-th band is (bands[i], bands[i]+step(bands))
 - bandi -- linear index into dem which assigns each cell to a elevation band
 - alphas, areas, lengths, widths, x, xmid -- elevation band slope, area, etc
 - dem -- the used DEM, a possibly smoothed version of the input DEM
@@ -51,31 +52,36 @@ function make_1Dglacier(dem::Gridded, binsize_or_bins, glaciermask=trues(size(de
     alpha2d = absslope(dem, glaciermask)
 
     bands, bandi = bin_grid(dem, binsize_or_bins, glaciermask, binround=binround)
-    bandsize = step(bands)
 
     nb = length(bands)
-    dz = step(bands)
     cellsz = step(dem.x)^2
 
     totalarea = sum(glaciermask)*cellsz
 
     malphas, widths, lengths, areas = (zeros(nb) for i=1:4)
+    dzs = zeros(nb)
     for i=1:nb
         ind = bandi[i]
+        if i!=nb
+            dzs[i] = abs(bands[i+1]-bands[i])
+        else
+            # TODO: a hack. Fix
+            dzs[i] = abs(bands[i]-bands[i-1])
+        end
         # this is the critical step:
         malphas[i] = band_slope(alpha2d[ind], i, alpha_min, alpha_max)
         areas[i] = length(ind)*cellsz
-        lengths[i] = dz/tan(malphas[i])
+        lengths[i] = dzs[i]/tan(malphas[i])
         widths[i] = areas[i]/lengths[i]
     end
 
     # Smooth the width:
     # Note, this can make the malphas noisy!
     if window_width_smooth>0
-        widths = boxcar(widths, round(Int, window_width_smooth/bandsize) )
+        widths = boxcar(widths, round(Int, window_width_smooth/mean(dzs) ))
         for i=1:nb
             lengths[i] = areas[i]/widths[i]
-            malphas[i] = atan(dz/lengths[i])
+            malphas[i] = atan(dzs[i]/lengths[i])
             @assert malphas[i]>=0
         end
     end
@@ -125,7 +131,7 @@ function band_slope(alphas, bandnr, alpha_min, alpha_max)
 
     n = length(alphas)
     if n==0
-        error("Band $bandnr has no element!")
+        error("Band $bandnr has no elements!")
         return deg2rad(45)
     end
     # magic slope calculation
@@ -144,9 +150,6 @@ function band_slope(alphas, bandnr, alpha_min, alpha_max)
     q_magic = rad2deg(alphas[iq_magic])
     # only use indices within those quantiles
     ind = q5 .<= rad2deg(alphas) .< q_magic
-    if sum(ind)<2
-        println("Magic band-slope calculation done with all cells for band $bandnr")
-    end
     out = sum(ind)>1 ? mean(alphas[ind]) : mean(alphas)
     # limit alphas
     out = max(alpha_min, out)
@@ -183,8 +186,13 @@ function bin_grid(v::Matrix, binsize_or_bins, mask=BitArray([]); binround=_binro
     nv = length(v)
     if isa(binsize_or_bins, Number) # i.e. a binsize
         mi, ma = minimum(v), maximum(v)
-        binstart = floor(mi, binround)
-        binend = floor(ma, binround)
+        if binsize_or_bins>=0
+            binstart = floor(mi, binround)
+            binend = floor(ma, binround) # better: `ceil(ma, binround) - binsize_or_bins` ?
+        else
+            binstart = ceil(ma, binround)
+            binend = ceil(mi, binround) # better: `ceil(ma, binround) - binsize_or_bins` ?
+        end
         bins = binstart:binsize_or_bins:binend # these are the start of the bins
     else
         bins = binsize_or_bins
@@ -225,7 +233,7 @@ Bins a trajectory using a grid
 KW:
 - binround -- floor the bin-start using this many digits (see help of floor)
 """
-function bin_traj(tr::Traj, g::Gridded, binsize_or_bins, mask=trues(size(g.v)); binround=-floor(Int, log10(binsize_or_bins)))
+function bin_traj(tr::Traj, g::Gridded, binsize_or_bins, mask=trues(size(g.v)); binround=_binround(binsize_or_bins))
     @assert size(mask)==size(g.v)
 
     demi  = Interpolations.interpolate((g.x, g.y), g.v, Interpolations.Gridded(Interpolations.Linear()) )
@@ -709,7 +717,7 @@ function calc_fluxdir(l::Line, ux, uy, window, dx, bands)
             end
     end
     # for reverse ordered bands, need a sign flip
-    sig = sign(step(bands))
+    sig = sign(bands[2]-bands[1])
 
     return sig*fluxdir,ii,jj,fluxdirx,fluxdiry
 end
@@ -843,4 +851,26 @@ function get_iv_boxcar_M(F, dem, mask, bands, bandi, lengths, iv_window_frac)
 
     return VAWTools.boxcar_matrix(F, Int((iv_window_frac*maximum(lengths))÷dx)+1, mask_ubar_, !mask),
            boundaries, ux, uy
+end
+
+
+#################
+# Plotting
+################
+"""
+    plot_bands(dem, bands, bandi; bands2plot=1:length(bands))
+
+Plots the bands in 2D.  For length(bands2plot)<=16 the default
+colorscale will show one color per band.
+
+Needs Plots.jl imported in Main (REPL)
+"""
+function plot_bands(dem, bands, bandi; bands2plot=1:length(bands))
+    binmat = Float64.(VAWTools.bins2matrix(dem, bands, bandi))
+    for i in eachindex(binmat)
+        if !(binmat[i] in bands2plot)
+            binmat[i] = NaN
+        end
+    end
+    Main.contourf(dem.x,dem.y,binmat',aspect_ratio=:equal)
 end
