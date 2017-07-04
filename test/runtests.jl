@@ -1,6 +1,6 @@
 using VAWTools
 using Base.Test
-using SHA
+using SHA, Compat
 
 function sha(fn)
     open(fn) do f
@@ -24,13 +24,13 @@ end
 gc.v[4,5] = NaN
 for i=1:10
     ds = downsample(gc,i).v
-    @test all((ds.==5) | (isnan(ds)))
+    @test all((ds.==5) .| (isnan.(ds)))
     @test downsample(g,i).v==boxcar(g.v,Int(floor((i)/2)))[1:i:end,1:i:end]
 end
 averagemask = trues(size(gc.v))
 for i=1:10
     ds = downsample(gc,i,1,true,averagemask).v
-    @test all((ds.==5) | (isnan(ds)))
+    @test all((ds.==5) .| (isnan.(ds)))
     @test downsample(g,i,1,true,trues(size(g.v))).v==boxcar(g.v,Int(floor((i)/2)))[1:i:end,1:i:end]
 end
 averagemask = trues(size(g.v))
@@ -425,7 +425,7 @@ filt2 = VAWTools.apply_boxcar_matrix(M, orig)
 @test eltype(orig)==eltype(filt1)
 @test eltype(orig)==eltype(filt2)
 for i=eachindex(orig)
-    @test_approx_eq filt1[i] filt2[i]
+    @test filt1[i] ≈ filt2[i]
 end
 # with weightsb
 filt1 = VAWTools.boxcar(orig, window, weightsb)
@@ -438,7 +438,7 @@ filt2 = VAWTools.apply_boxcar_matrix(M, orig)
 @test eltype(orig)==eltype(filt1)
 @test eltype(orig)==eltype(filt2)
 for i=eachindex(orig)
-    @test_approx_eq filt1[i] filt2[i]
+    @test filt1[i] ≈ filt2[i]
 end
 # with weightsbb
 filt1 = VAWTools.boxcar(orig, window, weightsbb)
@@ -451,7 +451,7 @@ filt2 = VAWTools.apply_boxcar_matrix(M, orig)
 @test eltype(orig)==eltype(filt1)
 @test eltype(orig)==eltype(filt2)
 for i=eachindex(orig)
-    @test_approx_eq filt1[i] filt2[i]
+    @test filt1[i] ≈ filt2[i]
 end
 
 # with weights and dropmask
@@ -465,7 +465,7 @@ filt2 = VAWTools.apply_boxcar_matrix(M, orig)
 @test eltype(orig)==eltype(filt1)
 @test eltype(orig)==eltype(filt2)
 for i=eachindex(orig)
-    @test_approx_eq filt1[i] filt2[i]
+    @test filt1[i] ≈ filt2[i]
 end
 
 # with NaN poisoning
@@ -478,7 +478,11 @@ filt2 = VAWTools.apply_boxcar_matrix(M, orig)
 @test eltype(orig)==eltype(filt1)
 @test eltype(orig)==eltype(filt2)
 for i=eachindex(orig)
-    @test_approx_eq filt1[i] filt2[i]
+    if isnan(filt1[i])
+        isequal(filt1[i], filt2[i])
+    else
+        @test filt1[i] ≈ filt2[i]
+    end
 end
 
 # when NaN is masked then the M-filter is different:
@@ -496,7 +500,7 @@ for j=1:nc,i=1:nr
         @test isnan(filt1[i,j])
         @test !isnan(filt2[i,j])
     else
-        @test_approx_eq filt1[i,j] filt2[i,j]
+        @test filt1[i,j] ≈ filt2[i,j]
     end
 end
 
@@ -609,8 +613,8 @@ binmat = VAWTools.bins2matrix(elevation,bands,bandi)
 # yticks(1:size(bm,2))
 # grid()
 @test all(elevation[mask].==binmat[mask])
-@test all(elevation[!mask].==-13)
-@test all(binmat[!mask].==0)
+@test all(elevation[(!).(mask)].==-13)
+@test all(binmat[(!).(mask)].==0)
 edges_at_boundaries = VAWTools.get_cells_on_boundary(bands, bandi, binmat)
 @test sort(collect(keys(edges_at_boundaries)))== Tuple{Int64,Int64}[(1,0),(1,2),(2,0),(2,1),(2,3),(3,0),(3,2),(3,4),(4,0),(4,3),(4,5),(4,7),(4,8),(5,0),(5,4),(5,6),(6,0),(6,5),(6,7),(7,0),(7,4),(7,6),(7,8),(7,9),(8,0),(8,4),(8,7),(8,9),(8,10),(9,0),(9,7),(9,8),(9,10),(10,0),(10,8),(10,9),(10,11),(11,0),(11,10)]
 
@@ -648,7 +652,7 @@ end
 
 q1d = bands+1
 u_trial = ones(elevation)
-thick = sqrt(elevation+13)
+thick = sqrt.(elevation+13)
 ux,uy = (-).(gradient3by3(1:13,1:14,elevation,mask))
 dx = 1.0
 lengths = rand(length(bands))

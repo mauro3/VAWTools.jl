@@ -1,6 +1,12 @@
 __precompile__() # RasterIO is not pre-compiled
 
 module VAWTools
+using Compat
+import Compat: IndexLinear
+# if VERSION < v"0.6.0-dev.2376"
+#     # https://github.com/JuliaLang/Compat.jl/issues/374
+#     eval(:(const StepRangeLen = FloatRange) )
+# end
 
 include("other-pks-fixes.jl")
 
@@ -15,7 +21,7 @@ import Base: ==, size, length, step, +, -, *
 
 # const spatialorder = "yx"  # order of imagestorage, https://github.com/timholy/Images.jl#storage-order-and-changing-the-representation-of-images
 
-abstract AGridded{T}
+@compat abstract type AGridded{T} end
 "Check whether an error-field is defined."
 haserror(g::AGridded) = isdefined(g,:err)
 size(g::AGridded) = size(g.v)
@@ -51,22 +57,22 @@ TODO:
 - hold NA value?
 """
 immutable Gridded{T} <: AGridded{T}
-    x::FloatRange{Float64}
-    y::FloatRange{Float64}
+    x::StepRangeLen{Float64}
+    y::StepRangeLen{Float64}
     midpoint::Bool  # if true, the (x,y) is cell midpoint, otherwise lower-left corner
     v::Matrix{T}  # values
     err::Matrix{T}  # error of values
-    function Gridded(x,y,midpoint,v,err)
+    function (::Type{Gridded{T}}){T}(x,y,midpoint,v,err)
         nx, ny = length(x), length(y)
         @assert size(v)==size(err)
         @assert size(v)==(length(x), length(y))
-        new(x,y,midpoint,v,err)
+        new{T}(x,y,midpoint,v,err)
     end
-    function Gridded(x,y,midpoint,v)
+    function (::Type{Gridded{T}}){T}(x,y,midpoint,v)
         @assert size(v)==(length(x), length(y))
-        new(x,y,midpoint,v)
+        new{T}(x,y,midpoint,v)
     end
-    Gridded() = new()
+    (::Type{Gridded{T}}){T}() = new{T}()
 end
 Gridded{T}(x, y, mp, v::Matrix{T}) = Gridded{T}(x, y, mp, v)
 Gridded{T}(x, y, mp, v::Matrix{T}, err::Matrix) = Gridded{T}(x,y,mp,v,err)
@@ -156,20 +162,20 @@ Holds 1D fields, e.g. elevation band data.
 Be sure to be clear whether x corresponds to cell centers or boundaries.
 """
 immutable Gridded1d{T} <:  AGridded{T}
-    x::FloatRange{Float64}
+    x::StepRangeLen{Float64}
     midpoint::Bool  # if true, the x is cell midpoint, otherwise the bound closer to x[1]
     v::Vector{T} # values
     err::Vector{T}  # error of values
-    function Gridded1d(x,mp,v,err)
+    function (::Type{Gridded1d{T}}){T}(x,mp,v,err)
         @assert size(v)==size(err)
         @assert size(v)==(length(x), )
-        new(x,mp,v,err)
+        new{T}(x,mp,v,err)
     end
-    function Gridded1d(x,mp,v)
+    function (::Type{Gridded1d{T}}){T}(x,mp,v)
         @assert size(v)==(length(x), )
-        new(x,mp,v)
+        new{T}(x,mp,v)
     end
-    Gridded1d() = new()
+    (::Type{Gridded1d{T}}){T}() = new{T}()
 end
 Gridded1d{T}(x, mp, v::Vector{T}) = Gridded1d{T}(x,mp,v)
 Gridded1d{T}(x, mp, v::Vector{T}, err::Vector) = Gridded1d{T}(x,mp,v,err)
@@ -197,31 +203,31 @@ type Traj{T}
     splits::Vector{UnitRange{Int}}
     v::Vector{T}
     err::Vector{T}
-    function Traj(x,y,v,err,splits::Vector{UnitRange{Int}})
+    function (::Type{Traj{T}}){T}(x,y,v,err,splits::Vector{UnitRange{Int}})
         @assert length(x)==length(y)==length(v)==length(err)
-        new(x,y,splits,v,err)
+        new{T}(x,y,splits,v,err)
     end
-    function Traj(x,y,v,err)
+    function (::Type{Traj{T}}){T}(x,y,v,err)
         @assert length(x)==length(y)==length(v)==length(err)
-        new(x,y,[1:length(x)],v,err)
+        new{T}(x,y,[1:length(x)],v,err)
     end
-    function Traj(x,y,v,splits::Vector{UnitRange{Int}})
+    function (::Type{Traj{T}}){T}(x,y,v,splits::Vector{UnitRange{Int}})
         @assert length(x)==length(y)==length(v)
-        new(x,y,splits,v)
+        new{T}(x,y,splits,v)
     end
-    function Traj(x,y,v)
+    function (::Type{Traj{T}}){T}(x,y,v)
         @assert length(x)==length(y)==length(v)
-        new(x,y,[1:length(x)],v)
+        new{T}(x,y,[1:length(x)],v)
     end
-    function Traj(x,y,splits::Vector{UnitRange{Int}})
+    function (::Type{Traj{T}}){T}(x,y,splits::Vector{UnitRange{Int}})
         @assert length(x)==length(y)
-        new(x,y,splits)
+        new{T}(x,y,splits)
     end
-    function Traj(x,y)
+    function (::Type{Traj{T}}){T}(x,y)
         @assert length(x)==length(y)
-        new(x,y,[1:length(x)])
+        new{T}(x,y,[1:length(x)])
     end
-    Traj() = new()
+    (::Type{Traj{T}}){T}() = new{T}()
 end
 Traj{T}(x, y, v::AbstractVector{T}, err::AbstractVector{T}) = Traj{T}(x,y,v,err)
 Traj{T}(x, y, v::AbstractVector{T}) = Traj{T}(x,y,v)
@@ -304,10 +310,10 @@ immutable AGR{T} # Ascii GRid
     NA::T           # NODATA
     extra_header::Vector{Float32} # the .bin files have space for
                                   # extra information in the header
-    function AGR(va, nc, nr, xll, yll, dx, NA, extra_header)
+    function (::Type{AGR{T}}){T}(va, nc, nr, xll, yll, dx, NA, extra_header)
         @assert size(va)==(nr,nc)
         @assert dx>=0
-        new(va, nc, nr, xll, yll, dx, NA, extra_header)
+        new{T}(va, nc, nr, xll, yll, dx, NA, extra_header)
     end
 end
 AGR{T}(va::Matrix{T}, nc, nr, xll, yll, dx, NA, extra_header) = AGR{T}(va, nc, nr, xll, yll, dx, NA, extra_header)
@@ -464,7 +470,7 @@ function _read_agr(io::IO, T=Float32, NA=nothing)
                 warn("End-of-file was not reached!")
             end
         else
-            va = Array(T, nr, nc)
+            va = Array{T}(nr, nc)
             # no extra header for ascii .agr
             extra_header = zeros(Float32, 6)
             # read values
@@ -694,7 +700,7 @@ function concat_poly(mpoly::Vector)
     # total size is sum of sizes plus one extra point for all but the
     # first poly.
     totsize = mapreduce(x->size(x,2), +, mpoly) + length(mpoly) -1
-    bigpoly = Array(T,size(mpoly[1],1),totsize)
+    bigpoly = Array{T}(size(mpoly[1],1),totsize)
     splits = Int[]
     is = 1
     for i=1:length(mpoly)
@@ -740,47 +746,52 @@ function split_poly{T}(bigpoly::Matrix{T}, splits)
     out
 end
 
+import Proj4
+# Make RasterIO conditional as it is not Julia 0.6 compatible
+if haskey(Pkg.installed(), "RasterIO")
+    println("Enabeling RasterIO function read_rasterio")
+    eval(quote
+        import RasterIO
+        """
+        read_rasterio(fn::AbstractString, T=Float32; NA=convert(T,NaN))
 
-import RasterIO, Proj4
-"""
-    read_rasterio(fn::AbstractString, T=Float32; NA=convert(T,NaN))
-
-Read various raster formats via the RasterIO.jl package.  Put output
-into a Gridded instance and the Proj4 projection string.
-
-"""
-function read_rasterio(fn::AbstractString, T=Float32; NA=convert(T,NaN))
-    ra = RasterIO.openraster(fn)
-    nr = ra.height
-    nc = ra.width
-    #proj = RasterIO.getprojection(ra.dataset)
-    proj4 = try # some computers may not have gdalsrsinfo installed
-        strip(readstring(`gdalsrsinfo -o proj4 $fn`), ['\n', ''', ' '])
-    catch
-        ""
-    end
-    va = convert(Matrix{T}, RasterIO.fetch(ra,1))
-    # get the NoData value
-    aa = Cint[0]
-    nodata, success = getrasternodatavalue(RasterIO.getrasterband(ra.dataset,1))
-    if success
-        for i in eachindex(va)
-            if va[i]==nodata
-                va[i] = NA
+        Read various raster formats via the RasterIO.jl package.  Put output
+        into a Gridded instance and the Proj4 projection string.
+        """
+        function read_rasterio(fn::AbstractString, T=Float32; NA=convert(T,NaN))
+            ra = RasterIO.openraster(fn)
+            nr = ra.height
+            nc = ra.width
+            #proj = RasterIO.getprojection(ra.dataset)
+            proj4 = try # some computers may not have gdalsrsinfo installed
+                strip(readstring(`gdalsrsinfo -o proj4 $fn`), ['\n', ''', ' '])
+            catch
+                ""
             end
+            va = convert(Matrix{T}, RasterIO.fetch(ra,1))
+            # get the NoData value
+            aa = Cint[0]
+            nodata, success = getrasternodatavalue(RasterIO.getrasterband(ra.dataset,1))
+            if success
+                for i in eachindex(va)
+                    if va[i]==nodata
+                        va[i] = NA
+                    end
+                end
+            end
+            gt = RasterIO.geotransform(ra)
+            origin = gt[[1,4]]
+            xll,yll = RasterIO.applygeotransform(gt, 0.0, Float64(ra.height))
+            pixelsz = gt[[2,6]]
+            dx = pixelsz[1]
+            dy = -pixelsz[2]
+            @assert gt[[3,5]]==[0,0] "Can only handle North-up images"
+            #Gridded(VAWTools.AGR(va', nc, nr, xll, yll, dx, nodata)), proj
+            Gridded(range(xll+dx/2, dx, nc),
+                    range(yll+dy/2, dy, nr),
+                    true, flipdim(va,2)), proj4
         end
-    end
-    gt = RasterIO.geotransform(ra)
-    origin = gt[[1,4]]
-    xll,yll = RasterIO.applygeotransform(gt, 0.0, Float64(ra.height))
-    pixelsz = gt[[2,6]]
-    dx = pixelsz[1]
-    dy = -pixelsz[2]
-    @assert gt[[3,5]]==[0,0] "Can only handle North-up images"
-    #Gridded(VAWTools.AGR(va', nc, nr, xll, yll, dx, nodata)), proj
-    Gridded(range(xll+dx/2, dx, nc),
-            range(yll+dy/2, dy, nr),
-            true, flipdim(va,2)), proj4
+    end)
 end
 
 ## Shapefiles
@@ -926,7 +937,7 @@ immutable UniformArray{T,N} <: AbstractArray{T,N}
 end
 Base.size{T,N}(::UniformArray{T,N}) = ntuple(x->typemax(Int), Val{N})
 Base.getindex(A::UniformArray, i::Int) = A.val
-Base.linearindexing{U<:UniformArray}(::Type{U}) = Base.LinearFast()
+@compat Base.IndexStyle{U<:UniformArray}(::Type{U}) = IndexLinear()
 Base.start(::UniformArray) = error("Cannot iterate over UniformArray")
 # Does not work https://github.com/JuliaLang/julia/issues/18004
 #Base.show{T,N}(io::IO, u::UniformArray{T,N}) = print(io, "UniformArray{$T,$N} with value $(u.val)")

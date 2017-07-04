@@ -41,7 +41,7 @@ function make_1Dglacier(dem::Gridded, binsize_or_bins, glaciermask=trues(size(de
     if window_dem_smooth>0
         dem = deepcopy(dem)
         fillmask = dem.v.!=FILL
-        mask = fillmask & glaciermask
+        mask = fillmask .& glaciermask
         dem.v[:] = boxcar(dem.v, round(Int,window_dem_smooth/dx), mask, !mask)
         dem.v[!fillmask] = FILL
     end
@@ -141,7 +141,7 @@ function band_slope(alphas, bandnr, alpha_min, alpha_max)
     iq20 = max(1,round(Int,n*f_q20))
     iq80 = min(n,round(Int,n*f_q80))
     # angle of those quantiles:
-    q5, q20, q80 = map(rad2deg, (alphas[iq5], alphas[iq20], alphas[iq80]))
+    q5, q20, q80 = [rad2deg.(i) for i in (alphas[iq5], alphas[iq20], alphas[iq80])]
     # Now some of Matthias' magic:
     a = (q20/q80)*ratio_fac # 2x ratio of angles
     a = min(a, q_band[2])
@@ -149,7 +149,7 @@ function band_slope(alphas, bandnr, alpha_min, alpha_max)
     iq_magic = round(Int,n*a)  # set a "new" magic quantile to that value
     q_magic = rad2deg(alphas[iq_magic])
     # only use indices within those quantiles
-    ind = q5 .<= rad2deg(alphas) .< q_magic
+    ind = q5 .<= rad2deg.(alphas) .< q_magic
     out = sum(ind)>1 ? mean(alphas[ind]) : mean(alphas)
     # limit alphas
     out = max(alpha_min, out)
@@ -362,7 +362,7 @@ function bandi_for_other_grid(bands, bandi, binmat::Matrix{Int}, g::Gridded,
         for j=1:size(og.v,2)
             for i=1:size(og.v,1)
                 if othermask[i,j]
-                    ind = itpm[og.x[i], og.y[j]]
+                    ind = convert(Int, itpm[og.x[i], og.y[j]])
                     if ind>0
                         push!(bandi_[ind], sub2ind(dims, i, j))
                     end
@@ -535,7 +535,7 @@ function get_cells_on_boundary(bands, bandi, binmat, landmask=nothing)
     if landmask!=nothing
         # encode sea cells in binmat
         binmat = copy(binmat)
-        binmat[(landmask.==0) & (binmat.==0)] = -1
+        binmat[(landmask.==0) .& (binmat.==0)] = -1
     end
 
     # The boundaries of all bands:
@@ -595,7 +595,7 @@ function calc_boundaries(bands, bandi, binmat, landmask=nothing)
     if landmask!=nothing
         # encode sea cells in binmat
         binmat = copy(binmat)
-        binmat[(landmask.==0) & (binmat.==0)] = -1
+        binmat[(landmask.==0) .& (binmat.==0)] = -1
     end
 
     # The boundaries of all bands:
@@ -765,7 +765,7 @@ function calc_u(q1d, boundaries, u_trial, thick,
                                     ux, uy, dx, mask, bands,
                                     flux_dir_window, # in [m]
                                     plotyes,x,y)
-    return boxcar(ubar_, Int((window_frac*maximum(lengths))÷dx)+1, mask_ubar_, !mask), ubar, facs, mask_ubar_
+    return boxcar(ubar_, Int((window_frac*maximum(lengths))÷dx)+1, mask_ubar_, (!).(mask) ), ubar, facs, mask_ubar_
 end
 # this helper function is needed for type stability
 function _calc_u(q1d, boundaries, u_trial, thick,
@@ -817,9 +817,9 @@ function _calc_u(q1d, boundaries, u_trial, thick,
             ubar[i,j] = u[n]
         end
     end
-    mask_ubar_ = mask & (!isnan(ubar)) # location of all cells for which `ubar` was calculated
+    mask_ubar_ = mask .& ((!).(isnan.(ubar))) # location of all cells for which `ubar` was calculated
     ubar_ = copy(ubar)
-    ubar_[isnan(ubar_)] = 0
+    ubar_[isnan.(ubar_)] = 0
     # if plotyes
     #     # imshow(binmat',origin="lower", extent=(x[1],x[end],y[1],y[end]), cmap="flag"); colorbar();
     #     imshow(ubar',origin="lower", extent=(x[1],x[end],y[1],y[end]),); colorbar(); clim(0,50)
