@@ -3,10 +3,15 @@ __precompile__() # RasterIO is not pre-compiled
 module VAWTools
 using Compat
 import Compat: IndexLinear
-# if VERSION < v"0.6.0-dev.2376"
-#     # https://github.com/JuliaLang/Compat.jl/issues/374
-#     eval(:(const StepRangeLen = FloatRange) )
-# end
+
+if VERSION < v"0.6.0-dev.2376"
+    # https://github.com/JuliaLang/Compat.jl/issues/374
+    # https://github.com/JuliaLang/Compat.jl/pull/375
+    const StepRangeLen = FloatRange
+    @compat const SRangeL{F} = StepRangeLen{F}
+else
+    @compat const SRangeL{F} = StepRangeLen{F,Base.TwicePrecision{F},Base.TwicePrecision{F}}
+end
 
 include("other-pks-fixes.jl")
 
@@ -57,8 +62,8 @@ TODO:
 - hold NA value?
 """
 immutable Gridded{T} <: AGridded{T}
-    x::StepRangeLen{Float64}
-    y::StepRangeLen{Float64}
+    x::SRangeL{Float64}
+    y::SRangeL{Float64}
     midpoint::Bool  # if true, the (x,y) is cell midpoint, otherwise lower-left corner
     v::Matrix{T}  # values
     err::Matrix{T}  # error of values
@@ -162,7 +167,7 @@ Holds 1D fields, e.g. elevation band data.
 Be sure to be clear whether x corresponds to cell centers or boundaries.
 """
 immutable Gridded1d{T} <:  AGridded{T}
-    x::StepRangeLen{Float64}
+    x::SRangeL{Float64}
     midpoint::Bool  # if true, the x is cell midpoint, otherwise the bound closer to x[1]
     v::Vector{T} # values
     err::Vector{T}  # error of values

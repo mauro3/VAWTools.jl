@@ -42,8 +42,8 @@ function make_1Dglacier(dem::Gridded, binsize_or_bins, glaciermask=trues(size(de
         dem = deepcopy(dem)
         fillmask = dem.v.!=FILL
         mask = fillmask .& glaciermask
-        dem.v[:] = boxcar(dem.v, round(Int,window_dem_smooth/dx), mask, !mask)
-        dem.v[!fillmask] = FILL
+        dem.v[:] = boxcar(dem.v, round(Int,window_dem_smooth/dx), mask, (!).(mask))
+        dem.v[(!).(fillmask)] = FILL
     end
     # no FILL inside glaciermask
     @assert !any(dem.v[glaciermask].==FILL)
@@ -849,7 +849,7 @@ function get_iv_boxcar_M(F, dem, mask, bands, bandi, lengths, iv_window_frac)
                                             flux_dir_window,
                                             false,nothing,nothing)
 
-    return VAWTools.boxcar_matrix(F, Int((iv_window_frac*maximum(lengths))÷dx)+1, mask_ubar_, !mask),
+    return VAWTools.boxcar_matrix(F, Int((iv_window_frac*maximum(lengths))÷dx)+1, mask_ubar_, (!).(mask)),
            boundaries, ux, uy
 end
 
