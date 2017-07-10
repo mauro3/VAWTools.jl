@@ -49,7 +49,8 @@ function make_1Dglacier(dem::Gridded, binsize_or_bins, glaciermask=trues(size(de
     @assert !any(dem.v[glaciermask].==FILL)
 
     # 2D slopes
-    alpha2d = absslope(dem, glaciermask)
+    ret_nans = false
+    alpha2d = absslope(dem, glaciermask, ret_nans)
 
     bands, bandi = bin_grid(dem, binsize_or_bins, glaciermask, binround=binround)
 
