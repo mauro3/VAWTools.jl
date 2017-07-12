@@ -875,6 +875,8 @@ Transform between projections.  Uses Proj4.jl.  Example:
 Input:
 - xy or xyz vector, matrix or trajectory of input points (x,y) or (x,y,z)
 - `from` and `to` are either strings for Proj4.Projections (more preformant).
+
+See VAWTools.Projections for pre-defined projections
 """
 function transform_proj(xyz, from, to)
     from = Proj4.Projection(from)
@@ -891,6 +893,14 @@ function transform_proj(tr::Traj, from, to)
     else
         Traj(xy[:,1], xy[:,2], tr.v, tr.splits)
     end
+end
+
+module Projections
+using Proj4
+"Swiss grid 1903"
+const swiss1903 = Proj4.Projection("+proj=somerc +lat_0=46.95240555555556 +lon_0=7.439583333333333 +k_0=1 +x_0=600000 +y_0=200000 +ellps=bessel +towgs84=674.374,15.056,405.346,0,0,0,0 +units=m +no_defs")
+"Longitude latitude"
+const longlat = Proj4.Projection("+proj=longlat")
 end
 
 ######
@@ -1269,7 +1279,7 @@ end
 
 
 "Mean ignoring fill"
-function meanfill(a,fill)
+function meanfill(a,fill,verbose=false)
     n = 0
     cum = zero(eltype(a))
     @inbounds for i in eachindex(a)
@@ -1279,7 +1289,7 @@ function meanfill(a,fill)
         end
     end
     if n==0
-        println("Could not fill a gap! Returning fill.")
+        verbose && println("Could not fill a gap! Returning fill.")
         return fill
     end
     cum/n # == NaN if n==0

@@ -358,7 +358,8 @@ function bandi_for_other_grid(bands, bandi, binmat::Matrix{Int}, g::Gridded,
     if g.x!=og.x || g.y!=og.y
         bandi_ = [Int[] for i=1:length(bands)]
         dims = size(og.v)
-        itpm = Interpolations.interpolate((g.x, g.y), binmat, Interpolations.Gridded(Interpolations.Constant()) );
+        itpm = Interpolations.interpolate((g.x, g.y), binmat,
+                            Interpolations.Gridded(Interpolations.Constant()) );
         itpm = Interpolations.extrapolate(itpm, 0);
         for j=1:size(og.v,2)
             for i=1:size(og.v,1)
@@ -782,10 +783,19 @@ function _calc_u(q1d, boundaries, u_trial, thick,
     facs = Float64[]
     for (ib,bnd) in enumerate(boundaries)
         if ib<length(bands)
-            bb = bnd[ib+1]
+            # Find the receiving band, can be a number further than 1.
+            ibb = 0
+            for ib_=ib+1:length(bands)
+                if haskey(bnd, ib_)
+                    ibb = ib_
+                    break
+                end
+            end
+            ibb==0 && error("no band below band $ib, but $ib is not bottom band!")
+            bb=bnd[ibb]
         else # outflow at terminus
             # TODO: this probably needs updating where several elevation bands contribute (tide-water)
-            # -> no only ever the last band does outflow
+            # -> no, only ever the last band does outflow
             bb = get(bnd, -1, bnd[0]) # if sea-terminating use those edges.
         end
         # loop over segments
