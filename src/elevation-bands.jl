@@ -70,10 +70,28 @@ function make_1Dglacier(dem::Gridded, binsize_or_bins, glaciermask=trues(size(de
             dzs[i] = abs(bands[i]-bands[i-1])
         end
         # this is the critical step:
-        malphas[i] = band_slope(alpha2d[ind], i, alpha_min, alpha_max)
+        malphas[i] = band_slope!(alpha2d[ind], i, alpha_min, alpha_max)
         areas[i] = length(ind)*cellsz
         lengths[i] = dzs[i]/tan(malphas[i])
         widths[i] = areas[i]/lengths[i]
+    end
+    # update missing bands
+    for i=1:nb
+        if malphas[i]==-9999
+            ma1 = malphas[max(1,i-1)]
+            ma2 = malphas[min(nb,i+1)]
+            if ma1==-9999 && ma2==-9999
+                error("Too many consecutive bands for which no slope could be calculated: $(max(1,i-1):min(nb,i+1))")
+            elseif ma1==-9999
+                malphas[i] = ma2
+            elseif ma2==-9999
+                malphas[i] = ma1
+            else
+                malphas[i] = 1/2*(ma1+ma2)
+            end
+            lengths[i] = dzs[i]/tan(malphas[i])
+            widths[i] = areas[i]/lengths[i]
+        end
     end
 
     # Smooth the width:
@@ -109,7 +127,7 @@ end
 
 
 """
-    band_slope(alphas, bandnr, alpha_min=deg2rad(0.4), alpha_max=deg2rad(60.0))
+    band_slope!(alphas, bandnr, alpha_min=deg2rad(0.4), alpha_max=deg2rad(60.0))
 
 Need to calculate a meaningful mean of the slopes in a elevation bin.
 *This is tricky but critical!*
@@ -118,11 +136,11 @@ One check can be that all the bin-lengths should add up to the total
 glacier length.
 
 Input:
-- alphas -- slope angles in one band
+- alphas -- slope angles in one band (these are sorted in place, thus the ! in the function name)
 - bandnr -- which band those alphas belong to (only used for error message)
 - alpha_max, alpha_min -- maximal and minimal allowed slope
 """
-function band_slope(alphas, bandnr, alpha_min, alpha_max)
+function band_slope!(alphas, bandnr, alpha_min, alpha_max)
     # parameters
     ratio_fac = 2
     f_q5 = 0.05
@@ -132,8 +150,9 @@ function band_slope(alphas, bandnr, alpha_min, alpha_max)
 
     n = length(alphas)
     if n==0
-        error("Band $bandnr has no elements!")
-        return deg2rad(45)
+        return -9999*one(alpha_min)
+        # error("Band $bandnr has no elements!")
+        # return deg2rad(45)
     end
     # magic slope calculation
     sort!(alphas)
@@ -142,7 +161,7 @@ function band_slope(alphas, bandnr, alpha_min, alpha_max)
     iq20 = max(1,round(Int,n*f_q20))
     iq80 = min(n,round(Int,n*f_q80))
     # angle of those quantiles:
-    q5, q20, q80 = [rad2deg.(i) for i in (alphas[iq5], alphas[iq20], alphas[iq80])]
+    q5, q20, q80 = [max(rad2deg.(i),eps(alpha_min)) for i in (alphas[iq5], alphas[iq20], alphas[iq80])]
     # Now some of Matthias' magic:
     a = (q20/q80)*ratio_fac # 2x ratio of angles
     a = min(a, q_band[2])
@@ -791,7 +810,7 @@ function _calc_u(q1d, boundaries, u_trial, thick,
                     break
                 end
             end
-            ibb==0 && error("no band below band $ib, but $ib is not bottom band!")
+            ibb==0 && error("No band below band $ib, but $ib is not bottom band!  This means that the domain is likely disjoint.")
             bb=bnd[ibb]
         else # outflow at terminus
             # TODO: this probably needs updating where several elevation bands contribute (tide-water)
@@ -847,8 +866,8 @@ most expensive part).
 """
 function get_iv_boxcar_M(F, dem, mask, bands, bandi, lengths, iv_window_frac)
     ux,uy = (-).(gradient3by3(dem, mask))
-    binmat = VAWTools.bins2matrix(dem, bands, bandi)
-    boundaries = VAWTools.calc_boundaries(bands,bandi,binmat)
+    binmat = bins2matrix(dem, bands, bandi)
+    boundaries = calc_boundaries(bands,bandi,binmat)
     q1d = ones(bands)
     u_trial = ones(dem.v)
     thick = u_trial
@@ -860,7 +879,7 @@ function get_iv_boxcar_M(F, dem, mask, bands, bandi, lengths, iv_window_frac)
                                             flux_dir_window,
                                             false,nothing,nothing)
 
-    return VAWTools.boxcar_matrix(F, Int((iv_window_frac*maximum(lengths))÷dx)+1, mask_ubar_, (!).(mask)),
+    return boxcar_matrix(F, Int((iv_window_frac*maximum(lengths))÷dx)+1, mask_ubar_, (!).(mask)),
            boundaries, ux, uy
 end
 
