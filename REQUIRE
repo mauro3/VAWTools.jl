@@ -1,4 +1,4 @@
-julia 0.5
+julia 0.6
 Compat
 SmoothingSplines
 StatsBase
@@ -6,3 +6,4 @@ Proj4
 Interpolations
 GeoInterface
 Shapefile
+Parameters

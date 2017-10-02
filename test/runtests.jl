@@ -10,32 +10,33 @@ end
 
 ## Gridded
 ##########
-g = Gridded(1.:37,1:17., rand(37,17))
+g = Gridded(1.:37, 1:17., rand(37,17))
 gc = Gridded(1.:10,1:11., 5*ones(10,11) )
 
 @test g.v==downsample(g,1).v
 @test_throws ArgumentError downsample(g,0)
 
-for i=1:10
+for i=1:9
     @test all(downsample(gc,i).v.==5)
     @test downsample(g,i).v==boxcar(g.v,Int(floor((i)/2)))[1:i:end,1:i:end]
 end
+@test_throws AssertionError downsample(gc,10)
 
 gc.v[4,5] = NaN
-for i=1:10
+for i=1:9
     ds = downsample(gc,i).v
     @test all((ds.==5) .| (isnan.(ds)))
     @test downsample(g,i).v==boxcar(g.v,Int(floor((i)/2)))[1:i:end,1:i:end]
 end
 averagemask = trues(size(gc.v))
-for i=1:10
+for i=1:9
     ds = downsample(gc,i,1,true,averagemask).v
     @test all((ds.==5) .| (isnan.(ds)))
     @test downsample(g,i,1,true,trues(size(g.v))).v==boxcar(g.v,Int(floor((i)/2)))[1:i:end,1:i:end]
 end
 averagemask = trues(size(g.v))
 averagemask[2,1] = false
-for i=1:10
+for i=1:9
     ds = downsample(g,i,1,true,averagemask).v
     bc = boxcar(g.v,Int(floor((i)/2)),averagemask)[1:i:end,1:i:end]
     @test bc==ds
@@ -92,10 +93,13 @@ g1 = VAWTools.read_agr("testfiles/wiki.agr")
 @test g1.y==g2.y
 @test g1.midpoint==g2.midpoint
 
+# Matthias abuse of NODATA_value field as UTM zone:
+VAWTools.read_agr("testfiles/wiki.agr")
+
 
 ## RasterIO agr reading
 g1 = VAWTools.read_agr("testfiles/wiki.agr")
-println("Expected output: ERROR 1: ERROR - failed to load SRS ...")
+# println("Expected output: ERROR 1: ERROR - failed to load SRS ...")
 # g2,proj4 = VAWTools.read_rasterio("testfiles/wiki.agr")
 # @test isequal(g1.v,g2.v)
 # @test g1.x==g2.x
@@ -137,7 +141,7 @@ gg = Gridded(g1)
 # @test isa(gt.v, Array{Float32,2})
 
 # Trajectory
-@test_throws AssertionError Traj(1:5, 6:11, 0.0:5.0)
+@test_throws AssertionError Traj(1:5, 6:11, [0.0:5.0;])
 
 tr = Traj(1.0:5, 6.0:10)
 @test tr.x==collect(1.0:5)
@@ -146,7 +150,7 @@ tr = Traj(1.0:5, 6.0:10)
 @test !VAWTools.haserror(tr)
 @test !VAWTools.hasvalues(tr)
 
-tr = Traj(1.0:5, 6.0:10, [1:3,4:5])
+tr = Traj(1.0:5, 6.0:10, Void[], Void[], [1:3,4:5])
 @test tr.x==collect(1.0:5)
 @test tr.y==collect(6.0:10)
 @test tr.splits==[1:3,4:5]
@@ -161,7 +165,7 @@ tr = Traj(1.0:5, 6.0:10, 1.0:5.0)
 @test !VAWTools.haserror(tr)
 @test VAWTools.hasvalues(tr)
 
-tr = Traj(1.0:5, 6.0:10, 1.0:5.0, [1:3,4:5])
+tr = Traj(1.0:5, 6.0:10, 1.0:5.0, Float64[], [1:3,4:5])
 @test tr.x==collect(1.0:5)
 @test tr.y==collect(6.0:10)
 @test tr.v==collect(1.0:5)

@@ -1,17 +1,9 @@
 __precompile__() # RasterIO is not pre-compiled
+warn("BREAKING CHANGE: The Gridded, Gridded1d and Traj interface was overhauled.")
 
 module VAWTools
 using Compat
-import Compat: IndexLinear
-
-if VERSION < v"0.6.0-dev.2376"
-    # https://github.com/JuliaLang/Compat.jl/issues/374
-    # https://github.com/JuliaLang/Compat.jl/pull/375
-    const StepRangeLen = FloatRange
-    @compat const SRangeL{F} = StepRangeLen{F}
-else
-    @compat const SRangeL{F} = StepRangeLen{F,Base.TwicePrecision{F},Base.TwicePrecision{F}}
-end
+using Parameters
 
 include("other-pks-fixes.jl")
 
@@ -28,7 +20,8 @@ import Base: ==, size, length, step, +, -, *
 
 @compat abstract type AGridded{T} end
 "Check whether an error-field is defined."
-haserror(g::AGridded) = isdefined(g,:err)
+haserror(g::AGridded) = size(g.err)!=(0,0)
+hasproj(g::AGridded) = g.proj!=""
 size(g::AGridded) = size(g.v)
 length(g::AGridded) = length(g.v)
 step(g::AGridded) = step(g.x)
@@ -47,7 +40,6 @@ function Base.show(io::IO, g::AGridded)
     end
 end
 
-
 """
 Gridded holds 2D data (and its error) on a regular grid.
 
@@ -57,39 +49,20 @@ Gridded holds 2D data (and its error) on a regular grid.
 
 
 TODO:
-
-- hold projection information?
 - hold NA value?
+- default of err, see https://github.com/JuliaLang/julia/issues/23926
 """
-immutable Gridded{T} <: AGridded{T}
-    x::SRangeL{Float64}
-    y::SRangeL{Float64}
-    midpoint::Bool  # if true, the (x,y) is cell midpoint, otherwise lower-left corner
+@with_kw struct Gridded{T} <: AGridded{T}
+    x::StepRangeLen{Float64,Base.TwicePrecision{Float64},Base.TwicePrecision{Float64}}
+    y::StepRangeLen{Float64,Base.TwicePrecision{Float64},Base.TwicePrecision{Float64}}
     v::Matrix{T}  # values
-    err::Matrix{T}  # error of values
-    function (::Type{Gridded{T}}){T}(x,y,midpoint,v,err)
-        nx, ny = length(x), length(y)
-        @assert size(v)==size(err)
-        @assert size(v)==(length(x), length(y))
-        new{T}(x,y,midpoint,v,err)
-    end
-    function (::Type{Gridded{T}}){T}(x,y,midpoint,v)
-        @assert size(v)==(length(x), length(y))
-        new{T}(x,y,midpoint,v)
-    end
-    (::Type{Gridded{T}}){T}() = new{T}()
+    @assert size(v)==(length(x), length(y))
+    err::Matrix{T}=Matrix{eltype(v)}(0,0)  # error of values
+    midpoint::Bool=true  # if true, the (x,y) is cell midpoint, otherwise lower-left corner
+    proj::String="" # Proj4 string
 end
-Gridded{T}(x, y, mp, v::Matrix{T}) = Gridded{T}(x, y, mp, v)
-Gridded{T}(x, y, mp, v::Matrix{T}, err::Matrix) = Gridded{T}(x,y,mp,v,err)
-Gridded{T}(x, y, v::Matrix{T}) = Gridded{T}(x, y, true, v)
-Gridded{T}(x, y, v::Matrix{T}, err::Matrix) = Gridded{T}(x,y,true,v,err)
-function Base.convert{T2,T1}(::Type{Gridded{T2}}, g::Gridded{T1})
-    if haserror(g)
-        Gridded(g.x, g.y, g.midpoint, convert(Matrix{T2}, g.v), convert(Matrix{T2}, g.err))
-    else
-        Gridded(g.x, g.y, g.midpoint, convert(Matrix{T2}, g.v))
-    end
-end
+Gridded(x,y,v::Matrix{T}) where T = Gridded{T}(x,y,v,Matrix{T}(0,0),true,"")
+Gridded(x,y,v::Matrix{T},err) where T = Gridded{T}(x,y,v,err,true,"")
 
 """
     downsample(g::Gridded, step, start=1, average=true, averagemask=all_points)
@@ -103,19 +76,17 @@ function downsample(g::Gridded, step, start=1, average=true, averagemask=Uniform
     rx = start:step:size(g.v,1)
     ry = start:step:size(g.v,2)
     nx,ny = length(rx),length(ry)
+    @assert nx>1
+    @assert ny>1
     x = g.x[rx]
     y = g.y[ry]
     midpoint = g.midpoint
     # Window: no overlap on odd step sizes
     window = average ? Int(floor((step)/2)) : 1
     vnew = _downsample_boxcar(g.v,rx,ry,window,averagemask)
-    if haserror(g)
-        errnew = _downsample_boxcar(g.err,rx,ry,window,averagemask)
 
-        Gridded(x,y,midpoint,vnew,errnew)
-    else
-        Gridded(x,y,midpoint,vnew)
-    end
+    errnew = haserror(g) ? _downsample_boxcar(g.err,rx,ry,window,averagemask) : g.err
+    Gridded(x,y,vnew,errnew,g.midpoint,g.proj)
 end
 function _downsample_boxcar(v,rx,ry,window,averagemask)
     # make type which allows for averaging
@@ -155,10 +126,13 @@ function _downsample_boxcar(v,rx,ry,window,averagemask)
     return vnew
 end
 
-
-# (+)(g1::Gridded, g2::Gridded) = (@assert g1.midpoint==g2.midpoint; Gridded(g1.x, g1.y, g1.midpoint, g1.v+g2.v))
-# (*)(n::Number, g::Gridded) = Gridded(g.x, g.y, g.midpoint, g.v*n)
-# (*)(g::Gridded, n::Number) = n*g
+function (+)(g1::Gridded, g2::Gridded)
+    @assert g1.midpoint==g2.midpoint
+    @assert g1.proj==g2.proj
+    Gridded(g1.x, g1.y, g1.v.+g2.v, g1.err.+g2.err, g1.midpoint, g1.proj)
+end
+(*)(n::Number, g::Gridded) = Gridded(g.x, g.y, g.v*n, g.err*n, g.midpoint, g.proj)
+(*)(g::Gridded, n::Number) = n*g
 
 
 """
@@ -166,30 +140,26 @@ Holds 1D fields, e.g. elevation band data.
 
 Be sure to be clear whether x corresponds to cell centers or boundaries.
 """
-immutable Gridded1d{T} <:  AGridded{T}
-    x::SRangeL{Float64}
-    midpoint::Bool  # if true, the x is cell midpoint, otherwise the bound closer to x[1]
+@with_kw struct Gridded1d{T} <:  AGridded{T}
+    x::StepRangeLen{Float64,Base.TwicePrecision{Float64},Base.TwicePrecision{Float64}}
     v::Vector{T} # values
-    err::Vector{T}  # error of values
-    function (::Type{Gridded1d{T}}){T}(x,mp,v,err)
-        @assert size(v)==size(err)
-        @assert size(v)==(length(x), )
-        new{T}(x,mp,v,err)
-    end
-    function (::Type{Gridded1d{T}}){T}(x,mp,v)
-        @assert size(v)==(length(x), )
-        new{T}(x,mp,v)
-    end
-    (::Type{Gridded1d{T}}){T}() = new{T}()
+    @assert size(v)==(length(x), )
+    err::Vector{T}=Vector{eltype(v)}(0) # error of values
+    @assert size(v)==size(err) || size(err)==(0,)
+    midpoint::Bool=true  # if true, the (x) is cell midpoint, otherwise lower corner
+    proj::String="" # Proj4 string
 end
-Gridded1d{T}(x, mp, v::Vector{T}) = Gridded1d{T}(x,mp,v)
-Gridded1d{T}(x, mp, v::Vector{T}, err::Vector) = Gridded1d{T}(x,mp,v,err)
-Gridded1d{T}(x, v::Vector{T}) = Gridded1d{T}(x,true,v)
-Gridded1d{T}(x, v::Vector{T}, err::Vector) = Gridded1d{T}(x,true,v,err)
-(+)(g1::Gridded1d, g2::Gridded1d) = (@assert g1.midpoint==g2.midpoint; Gridded1d(g1.x, g1.midpoint, g1.v+g2.v))
-(*)(n::Number, g::Gridded1d) = Gridded1d(g.x, g.midpoint, g.v*n)
-(*)(g::Gridded1d, n::Number) = n*g
+Gridded1d(x,v::Matrix{T}) where T = Gridded1d{T}(x,v,T[],true,"")
+Gridded1d(x,v::Matrix{T},err) where T = Gridded1d{T}(x,v,err,true,"")
 
+
+# function (+)(g1::Gridded1d, g2::Gridded1d)
+#     @assert g1.midpoint==g2.midpoint
+#     @assert g1.proj==g2.proj
+#     Gridded1d(g1.x, g1.v+g2.v, g1.err+g2.err, g1.midpoint, g1.proj)
+# end
+(*)(n::Number, g::Gridded1d) = Gridded1d(g.x, g.v*n, g.err*n, g.midpoint, g.proj)
+(*)(g::Gridded1d, n::Number) = n*g
 
 """
 Holds values on a trajectory or generally unstructured data.
@@ -202,64 +172,27 @@ Fields:
 
 There are constructors to leave off splits, v and err.
 """
-type Traj{T}
+@with_kw mutable struct Traj{T}
     x::Vector{Float64}
     y::Vector{Float64}
-    splits::Vector{UnitRange{Int}}
-    v::Vector{T}
-    err::Vector{T}
-    function (::Type{Traj{T}}){T}(x,y,v,err,splits::Vector{UnitRange{Int}})
-        @assert length(x)==length(y)==length(v)==length(err)
-        new{T}(x,y,splits,v,err)
-    end
-    function (::Type{Traj{T}}){T}(x,y,v,err)
-        @assert length(x)==length(y)==length(v)==length(err)
-        new{T}(x,y,[1:length(x)],v,err)
-    end
-    function (::Type{Traj{T}}){T}(x,y,v,splits::Vector{UnitRange{Int}})
-        @assert length(x)==length(y)==length(v)
-        new{T}(x,y,splits,v)
-    end
-    function (::Type{Traj{T}}){T}(x,y,v)
-        @assert length(x)==length(y)==length(v)
-        new{T}(x,y,[1:length(x)],v)
-    end
-    function (::Type{Traj{T}}){T}(x,y,splits::Vector{UnitRange{Int}})
-        @assert length(x)==length(y)
-        new{T}(x,y,splits)
-    end
-    function (::Type{Traj{T}}){T}(x,y)
-        @assert length(x)==length(y)
-        new{T}(x,y,[1:length(x)])
-    end
-    (::Type{Traj{T}}){T}() = new{T}()
+    @assert length(x)==length(y)
+    v::Vector{T}=Void[]
+    @assert length(v)==length(y) || length(v)==0
+    err::Vector{T}=Vector{eltype(v)}(0)
+    @assert length(err)==length(y) || length(err)==0
+    splits::Vector{UnitRange{Int}}=UnitRange{Int}[1:length(x)]
+    proj::String="" # Proj4 string
 end
-Traj{T}(x, y, v::AbstractVector{T}, err::AbstractVector{T}) = Traj{T}(x,y,v,err)
-Traj{T}(x, y, v::AbstractVector{T}) = Traj{T}(x,y,v)
-Traj{T}(x::AbstractVector{T}, y::AbstractVector{T}) = Traj{T}(x,y)
+Traj(x,y) = Traj{Void}(x,y,Void[],Void[],UnitRange{Int}[1:length(x)],"")
+Traj(x,y,v::AV) where AV<:AbstractVector{T} where T = Traj{T}(x,y,v,T[],UnitRange{Int}[1:length(x)],"")
+Traj(x,y,v::AV,err) where AV<:AbstractVector{T} where T = Traj{T}(x,y,v,err,UnitRange{Int}[1:length(x)],"")
+Traj(x,y,v::AV,err,splits) where AV<:AbstractVector{T} where T = Traj{T}(x,y,v,err,splits,"")
 
-Traj{T}(x, y, v::AbstractVector{T}, err::AbstractVector{T}, splits::Vector{UnitRange{Int}}) =
-    Traj{T}(x,y,v,err,splits)
-Traj{T}(x, y, v::AbstractVector{T}, splits::Vector{UnitRange{Int}}) = Traj{T}(x,y,v,splits)
-Traj{T}(x::AbstractVector{T}, y::AbstractVector{T}, splits::Vector{UnitRange{Int}}) = Traj{T}(x,y,splits)
+hasvalues(g::Traj) = length(g.v)!=0
+haserror(g::Traj) = length(g.err)!=0
+hasproj(g::Traj) = g.proj!=""
+length(g::Traj) = length(g.x)
 
-
-haserror(t::Traj) = isdefined(t, :err)
-hasvalues(t::Traj) = isdefined(t, :v)
-Base.length(t::Traj) = length(t.x)
-# "Splits trajectory by inserting NaNs"
-# function split_traj_nan!(t::Traj, dist)
-#     # TODO this drops datapoints!
-#     for i=1:length(t.x)-1
-#         if (t.x[i]-t.x[i+1])^2+(t.y[i]-t.y[i+1])^2 > dist^2
-#             t.v[i]=NaN
-#             if haserror(t)
-#                 t.err[i]=NaN
-#             end
-#         end
-#     end
-#     nothing
-# end
 """
     split_traj!{T<:Traj}(t::T, dist)
 
@@ -285,16 +218,7 @@ function Base.convert{T2,T1}(::Type{Traj{T2}}, g::Traj{T1})
     end
     x = convert(Vector{T2}, g.x)
     y = convert(Vector{T2}, g.y)
-    if hasvalues(g)
-        if haserror(g)
-            Traj(x, y, convert(Vector{T2}, g.v), convert(Vector{T2}, g.err), g.splits)
-        else
-            Traj(x, y, convert(Vector{T2}, g.v), g.splits)
-        end
-    else
-        Traj(x, y, g.splits)
-    end
-
+    return Traj(x, y, convert(Vector{T2}, g.v), convert(Vector{T2}, g.err), g.splits, proj)
 end
 
 """
@@ -313,16 +237,17 @@ immutable AGR{T} # Ascii GRid
     yll::T          # YLLCORNER
     dx::T           # CELLSIZE
     NA::T           # NODATA
+    hasutm::Bool    # Matthias sometimes abuses the NODATA_value field as UTM-zone field
     extra_header::Vector{Float32} # the .bin files have space for
                                   # extra information in the header
-    function (::Type{AGR{T}}){T}(va, nc, nr, xll, yll, dx, NA, extra_header)
+    function (::Type{AGR{T}}){T}(va, nc, nr, xll, yll, dx, NA,
+                                 hasutm=false, extra_header=zeros(Float32,6))
         @assert size(va)==(nr,nc)
         @assert dx>=0
-        new{T}(va, nc, nr, xll, yll, dx, NA, extra_header)
+        new{T}(va, nc, nr, xll, yll, dx, NA, hasutm, extra_header)
     end
 end
-AGR{T}(va::Matrix{T}, nc, nr, xll, yll, dx, NA, extra_header) = AGR{T}(va, nc, nr, xll, yll, dx, NA, extra_header)
-AGR{T}(va::Matrix{T}, nc, nr, xll, yll, dx, NA) = AGR{T}(va, nc, nr, xll, yll, dx, NA, zeros(Float32, 6))
+AGR{T}(va::Matrix{T}, nc, nr, xll, yll, dx, NA, hasutm=false, extra_header=zeros(Float32,6)) = AGR{T}(va, nc, nr, xll, yll, dx, NA, hasutm, extra_header)
 
 """
 Transform Gridded to AGR
@@ -330,15 +255,22 @@ Transform Gridded to AGR
 Optional:
 - NA_g: no-data value of g:Gridded, defaults to NaN
 - NA_agr: no-data value of AGR output, defaults to NaN
+- utmzone: if 0<utmzone<61, then above two are ignored and instead a file with UTM_ZONE is written.
 - write_err: write g.err instead of g.v
+
 """
-function AGR{T}(g::Gridded{T}; NA_g=convert(T,NaN), NA_agr=convert(T,NaN), write_err=false)
+function AGR{T}(g::Gridded{T}; NA_g=convert(T,NaN), NA_agr=convert(T,NaN), write_err=false, utmzone=0)
     v = write_err ? g.err : g.v # whether to write the values or errors into the ascii grid
-    if !isequal(NA_g,NA_agr)
-        v = deepcopy(v)
-        for i=eachindex(v)
-            if isequal(v[i],NA_g)
-                v[i] =  NA_agr
+    if 0<utmzone<61
+        hasutm = true
+    else
+        hasutm = false
+        if !isequal(NA_g,NA_agr)
+            v = deepcopy(v)
+            for i=eachindex(v)
+                if isequal(v[i],NA_g)
+                    v[i] =  NA_agr
+                end
             end
         end
     end
@@ -353,7 +285,11 @@ function AGR{T}(g::Gridded{T}; NA_g=convert(T,NaN), NA_agr=convert(T,NaN), write
         xll = g.x[1]
         yll = g.y[1]
     end
-    AGR{T}(v, nc, nr, xll, yll, dx, NA_agr, zeros(Float32, 6))
+    if hasutm
+        AGR(v, nc, nr, xll, yll, dx, utmzone, hasutm)
+    else
+        AGR(v, nc, nr, xll, yll, dx, NA_agr)
+    end
 end
 
 # xs(g::AGR) = linspace(g.xll+g.dx/2, nr*g.dx, nr)
@@ -395,10 +331,13 @@ function Gridded{T}(agr::AGR{T}; NA=convert(T,NaN))
             if isequal(v[i], agr.NA); v[i] = NA end
         end
     end
+    proj = agr.hasutm ? "+proj=utm +zone=$(agr.NA)" : ""
     Gridded(range(agr.xll+agr.dx/2, agr.dx, agr.nc),
             range(agr.yll+agr.dx/2, agr.dx, agr.nr),
+            v,
+            zeros(T,0,0),
             true,
-            v)
+            proj)
 end
 
 # File readers
@@ -409,24 +348,30 @@ Check if .bin file nor not.  With IO types this may not work 100%.
 """
 isbin_file(fn::AbstractString) = splitext(fn)[2]==".bin"
 function isbin_file(fn::IO)
-    f = fn.name
+    if :name in fieldnames(typeof(fn))
+        f = fn.name
+    else # this should catch TranscodingStreams.jl
+        f = fn.stream.name
+    end
     f = strip(f, ['<','>']) # often looks like "<file asdf.ext>"
     f = strip(f)
     isbin_file(f)
 end
 
+"""
+    read_agr(fl, T=Float32; NA=convert(T,NaN))
 
-"""Read a Ascii grid.
-https://en.wikipedia.org/wiki/Esri_grid
+Read a Ascii grid https://en.wikipedia.org/wiki/Esri_grid.  Can also
+read from .gz compressed files, if `import CodecZlib`.
 
 In:
-fn -- file name
-Optional keywords:
-T -- type of output array.  Defaults to Float32.
-NA -- replace the fill value with this.  Defaults to use NaN.
+- fn -- file name
 
-Out:
-Gridded
+Optional keywords:
+- T -- type of output array. Defaults to Float32.
+- NA -- replace the fill value with this. Defaults to use NaN.
+
+Out: Gridded
 """
 function read_agr(fl, T=Float32; NA=convert(T,NaN))
     Gridded(_read_agr(fl, T, NA), NA=NA)::Gridded{T}
@@ -436,7 +381,12 @@ function _read_agr(fl::AbstractString, T=Float32, NA=nothing)
     if !isfile(fl)
         error("File $fl does not exist!")
     end
-    io = open(fl, "r")
+    if endswith(fl, ".gz")
+        @eval import CodecZlib
+        io = CodecZlib.GzipDecompressionStream(open(fl))
+    else
+        io = open(fl, "r")
+    end
     out = _read_agr(io, T, NA)
     close(io)
     return out
@@ -449,50 +399,60 @@ function _read_agr(io::IO, T=Float32, NA=nothing)
         toT = (io,T) -> parse(T, split(readline(io))[2])
     end
 
-        local va::Matrix{T}
-        # read header
-        # nc = toT(io)::Int
-        # nr = toT(io)::Int
-        # xll = toT(io,T)::T
-        # yll = toT(io,T)::T
-        # dx = toT(io,T)::T
-        # fill = toT(io,T)::T
-        nc = toT(io, Int)
-        nr = toT(io, Int)
-        xll = toT(io,T)
-        yll = toT(io,T)
-        dx = toT(io,T)
+    local va::Matrix{T}
+    # read header
+    nc = toT(io, Int)
+    nr = toT(io, Int)
+    xll = toT(io,T)
+    yll = toT(io,T)
+    dx = toT(io,T)
+    # Matthias sometimes abuses the NODATA_value field as UTM-zone field
+    # in non-binary grids:
+    if isbin_file(io)
         fill = toT(io,T)
-        if isbin_file(io)
-            # read extra header
-            extra_header = read(io, Float32, 6)
-            # read values
-            va = read(io, Float32, nc, nr).'
-            if eltype(va)!=T
-                error("Not implemented yet")
-            end
-            if !eof(io)
-                warn("End-of-file was not reached!")
-            end
+        hasutm = false
+    else
+        prop, val = split(readline(io))
+        if prop=="NODATA_value"
+            hasutm = false
+        elseif prop=="UTM_ZONE"
+            hasutm = true
         else
-            va = Array{T}(nr, nc)
-            # no extra header for ascii .agr
-            extra_header = zeros(Float32, 6)
-            # read values
-            tmp = split(readstring(io))
-            if length(tmp)!=nc*nr
-                error("Something's wrong with the file/stream $io.  It should contain $(nc*nr) values but has $(length(tmp))")
-            end
-            for i=1:nr, j=1:nc
-                va[i,j] = parse(T, tmp[(i-1)*nc + j])
-            end
+            error("Unrecognized last header field: $prop")
         end
-        # replace missing value with something else
-        if NA!=nothing && fill!=NA
-            fill = _refill!(va, fill, NA)
+        fill = parse(T,val)
+    end
+
+    if isbin_file(io)
+        # read extra header
+        extra_header = read(io, Float32, 6)
+        # read values
+        va = read(io, Float32, nc, nr).'
+        if eltype(va)!=T
+            error("Not implemented yet")
         end
+        if !eof(io)
+            warn("End-of-file was not reached!")
+        end
+    else
+        va = Array{T}(nr, nc)
+        # no extra header for ascii .agr
+        extra_header = zeros(Float32, 6)
+        # read values
+        tmp = split(readstring(io))
+        if length(tmp)!=nc*nr
+            error("Something's wrong with the file/stream $io.  It should contain $(nc*nr) values but has $(length(tmp))")
+        end
+        for i=1:nr, j=1:nc
+            va[i,j] = parse(T, tmp[(i-1)*nc + j])
+        end
+    end
+    # replace missing value with something else
+    if NA!=nothing && fill!=NA && hasutm
+        fill = _refill!(va, fill, NA)
+    end
     # make a AGR data structure
-    AGR(va, nc, nr, xll, yll, dx, fill, extra_header)
+    AGR(va, nc, nr, xll, yll, dx, fill, hasutm, extra_header)
 end
 # A function barrier is needed, thus this helper function:
 function _refill!(a::Array, oldfill, newfill)
@@ -561,7 +521,13 @@ function write_agr{T_}(g::AGR{T_}, fn::AbstractString; NA=nothing, T=T_)
         write(io, convT(g.yll))
         isbin_file(fn) || write(io, "cellsize      ")
         write(io, convT(g.dx))
-        isbin_file(fn) || write(io, "NODATA_value  ")
+        if !isbin_file(fn)
+            if g.hasutm
+                write(io, "UTM_ZONE      ")
+            else
+                write(io, "NODATA_value  ")
+            end
+        end
         # replace NA value if necessary
         if NA==nothing
             fill = g.NA
@@ -575,7 +541,11 @@ function write_agr{T_}(g::AGR{T_}, fn::AbstractString; NA=nothing, T=T_)
                 end
             end
         end
-        write(io, convT(fill))
+        if g.hasutm
+            write(io, convInt(fill))
+        else
+            write(io, convT(fill))
+        end
         # write extra header if .bin:
         isbin_file(fn) && write(io, g.extra_header)
         # write values
@@ -752,52 +722,52 @@ function split_poly{T}(bigpoly::Matrix{T}, splits)
 end
 
 import Proj4
-# Make RasterIO conditional as it is not Julia 0.6 compatible
-if haskey(Pkg.installed(), "RasterIO")
-    println("Enabeling RasterIO function read_rasterio")
-    eval(quote
-        import RasterIO
-        """
-        read_rasterio(fn::AbstractString, T=Float32; NA=convert(T,NaN))
+# # Make RasterIO conditional as it is not Julia 0.6 compatible
+# if haskey(Pkg.installed(), "RasterIO")
+#     println("Enabling RasterIO function read_rasterio")
+#     eval(quote
+#         import RasterIO
+#         """
+#         read_rasterio(fn::AbstractString, T=Float32; NA=convert(T,NaN))
 
-        Read various raster formats via the RasterIO.jl package.  Put output
-        into a Gridded instance and the Proj4 projection string.
-        """
-        function read_rasterio(fn::AbstractString, T=Float32; NA=convert(T,NaN))
-            ra = RasterIO.openraster(fn)
-            nr = ra.height
-            nc = ra.width
-            #proj = RasterIO.getprojection(ra.dataset)
-            proj4 = try # some computers may not have gdalsrsinfo installed
-                strip(readstring(`gdalsrsinfo -o proj4 $fn`), ['\n', ''', ' '])
-            catch
-                ""
-            end
-            va = convert(Matrix{T}, RasterIO.fetch(ra,1))
-            # get the NoData value
-            aa = Cint[0]
-            nodata, success = getrasternodatavalue(RasterIO.getrasterband(ra.dataset,1))
-            if success
-                for i in eachindex(va)
-                    if va[i]==nodata
-                        va[i] = NA
-                    end
-                end
-            end
-            gt = RasterIO.geotransform(ra)
-            origin = gt[[1,4]]
-            xll,yll = RasterIO.applygeotransform(gt, 0.0, Float64(ra.height))
-            pixelsz = gt[[2,6]]
-            dx = pixelsz[1]
-            dy = -pixelsz[2]
-            @assert gt[[3,5]]==[0,0] "Can only handle North-up images"
-            #Gridded(VAWTools.AGR(va', nc, nr, xll, yll, dx, nodata)), proj
-            Gridded(range(xll+dx/2, dx, nc),
-                    range(yll+dy/2, dy, nr),
-                    true, flipdim(va,2)), proj4
-        end
-    end)
-end
+#         Read various raster formats via the RasterIO.jl package.  Put output
+#         into a Gridded instance and the Proj4 projection string.
+#         """
+#         function read_rasterio(fn::AbstractString, T=Float32; NA=convert(T,NaN))
+#             ra = RasterIO.openraster(fn)
+#             nr = ra.height
+#             nc = ra.width
+#             #proj = RasterIO.getprojection(ra.dataset)
+#             proj4 = try # some computers may not have gdalsrsinfo installed
+#                 strip(readstring(`gdalsrsinfo -o proj4 $fn`), ['\n', '\'', ' '])
+#             catch
+#                 ""
+#             end
+#             va = convert(Matrix{T}, RasterIO.fetch(ra,1))
+#             # get the NoData value
+#             aa = Cint[0]
+#             nodata, success = getrasternodatavalue(RasterIO.getrasterband(ra.dataset,1))
+#             if success
+#                 for i in eachindex(va)
+#                     if va[i]==nodata
+#                         va[i] = NA
+#                     end
+#                 end
+#             end
+#             gt = RasterIO.geotransform(ra)
+#             origin = gt[[1,4]]
+#             xll,yll = RasterIO.applygeotransform(gt, 0.0, Float64(ra.height))
+#             pixelsz = gt[[2,6]]
+#             dx = pixelsz[1]
+#             dy = -pixelsz[2]
+#             @assert gt[[3,5]]==[0,0] "Can only handle North-up images"
+#             #Gridded(VAWTools.AGR(va', nc, nr, xll, yll, dx, nodata)), proj
+#             Gridded(range(xll+dx/2, dx, nc),
+#                     range(yll+dy/2, dy, nr),
+#                     true, flipdim(va,2)), proj4
+#         end
+#     end)
+# end
 
 ## Shapefiles
 import Shapefile, GeoInterface
@@ -901,6 +871,17 @@ using Proj4
 const swiss1903 = Proj4.Projection("+proj=somerc +lat_0=46.95240555555556 +lon_0=7.439583333333333 +k_0=1 +x_0=600000 +y_0=200000 +ellps=bessel +towgs84=674.374,15.056,405.346,0,0,0,0 +units=m +no_defs")
 "Longitude latitude"
 const longlat = Proj4.Projection("+proj=longlat")
+
+# UTM zones: utm1n, utm1s, etc
+# https://github.com/JuliaGeo/Proj4.jl
+for z=1:60
+    zs = Symbol("utm$(z)s")
+    zn = Symbol("utm$(z)n")
+    strs = "+proj=utm +zone=$z +south +datum=WGS84 +units=m +no_defs"
+    strn = "+proj=utm +zone=$z +north +datum=WGS84 +units=m +no_defs"
+    @eval $zs = Projection($strs)
+    @eval $zn = Projection($strn)
+end
 end
 
 ######
