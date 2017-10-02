@@ -149,8 +149,8 @@ Be sure to be clear whether x corresponds to cell centers or boundaries.
     midpoint::Bool=true  # if true, the (x) is cell midpoint, otherwise lower corner
     proj::String="" # Proj4 string
 end
-Gridded1d(x,v::Matrix{T}) where T = Gridded1d{T}(x,v,T[],true,"")
-Gridded1d(x,v::Matrix{T},err) where T = Gridded1d{T}(x,v,err,true,"")
+Gridded1d(x,v::Vector{T}) where T = Gridded1d{T}(x,v,T[],true,"")
+Gridded1d(x,v::Vector{T},err) where T = Gridded1d{T}(x,v,err,true,"")
 
 
 # function (+)(g1::Gridded1d, g2::Gridded1d)
@@ -413,9 +413,9 @@ function _read_agr(io::IO, T=Float32, NA=nothing)
         hasutm = false
     else
         prop, val = split(readline(io))
-        if prop=="NODATA_value"
+        if lowercase(prop)=="nodata_value"
             hasutm = false
-        elseif prop=="UTM_ZONE"
+        elseif lowercase(prop)=="utm_zone"
             hasutm = true
         else
             error("Unrecognized last header field: $prop")
