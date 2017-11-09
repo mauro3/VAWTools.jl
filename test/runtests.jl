@@ -403,6 +403,15 @@ poly = Float64[0.0 1 2 1  0.0
 #####
 # boxcar
 #####
+## 1D
+orig = [1:10.0;]
+window = 3
+@inferred VAWTools.boxcar(orig, window)
+filt1 = VAWTools.boxcar(orig, window)
+@test size(filt1)==size(orig)
+@test filt1==[2.5, 3.0, 3.5, 4.0, 5.0, 6.0, 7.0, 7.5, 8.0, 8.5]
+
+## 2D
 #nr,nc = 4,5
 T = Float32
 nr,nc = 20,31
@@ -508,6 +517,18 @@ for j=1:nc,i=1:nr
     end
 end
 
+## different left and right windows
+windows1 = (3,4)
+windows2 = ((2,3), (1,2))
+
+srand(1)
+orig = rand(T,nr,nc)
+
+for w in [windows1, windows2]
+    @inferred VAWTools.boxcar(orig, w)
+    @inferred VAWTools.boxcar(orig, w, weights)
+    @inferred VAWTools.boxcar(orig, w, weights, dropmask)
+end
 
 ####
 # piecewiselinear

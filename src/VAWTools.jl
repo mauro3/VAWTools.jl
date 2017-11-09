@@ -166,11 +166,12 @@ Holds values on a trajectory or generally unstructured data.
 
 Fields:
 - x,y -- coordinates
-- splits::Vector{UnitRange{Int}} -- If the trajectory consists of several sub-trajectories
 - v::Vector{T} -- values
 - err::Vector{T} -- errors (or second set of values)
+- splits::Vector{UnitRange{Int}} -- If the trajectory consists of several sub-trajectories
+- proj::String a string interpretable by Proj4
 
-There are constructors to leave off splits, v and err.
+There are constructors to leave off v, err, splits and proj.
 """
 @with_kw mutable struct Traj{T}
     x::Vector{Float64}
@@ -1293,10 +1294,21 @@ function mean_weighted(a,w)
 end
 
 """
-    boxcar(A::AbstractArray, window[, weights, dropmask])
+    boxcar(A::AbstractArray, window, [, weights, dropmask])
+    boxcar(A::AbstractArray, windows::Tuple, [, weights, dropmask])
+    boxcar(A::AbstractArray, window::AbstractArray, [, weights, dropmask])
 
 Boxcar filter.  The two argument call ignores NaNs.  The three & four
 argument call uses weights instead of NaNs, it can be a lot faster.
+
+Smoothing occurs over +/-window indices, 0 corresponds to no smoothing.
+The window can be specified as:
+- integer, for a symmetric window in all dimensions
+- a tuple to give lower and upper windows
+- a tuple of tuples to give different lower and upper windows for all dimensions
+
+If desired, a different window can be specified for each point.  Then
+pass an array of same size as A as window.
 
 For the weights it may be faster to use non-Bool arrays nor BitArrays,
 say Int8.  Note that even NaNs where weight==0 will poison the result!
@@ -1306,20 +1318,22 @@ their original value will be used.
 
 Also works for Vectors.
 
-Smoothing occurs over +/-window indices.
-
 From http://julialang.org/blog/2016/02/iteration
 """
-function boxcar(A::AbstractArray, window)
+boxcar(A::AbstractArray, window) = boxcar(A, (window,window))
+function boxcar(A::AbstractArray, windows::Tuple)
+    window_lower, window_upper = windows
     out = similar(A)
     R = CartesianRange(size(A))
     I1, Iend = first(R), last(R)
+    I_l = CartesianIndex(I1.I.*window_lower)
+    I_u = CartesianIndex(I1.I.*window_upper)
     for I in R # @inbounds does not help
         if !isnan(A[I])
             out[I] = NaN
         end
         n, s = 0, zero(eltype(out))
-        for J in CartesianRange(max(I1, I-I1*window), min(Iend, I+I1*window))
+        for J in CartesianRange(max(I1, I-I_l), min(Iend, I+I_u))
             if !isnan(A[J])
                 s += A[J]
                 n += 1
@@ -1329,7 +1343,8 @@ function boxcar(A::AbstractArray, window)
     end
     out
 end
-function boxcar(A::AbstractArray, window::AbstractArray)
+function boxcar(A::AbstractArray, windows::Tuple{<:AbstractArray, <:AbstractArray})
+    window_lower, window_upper = windows
     out = similar(A)
     R = CartesianRange(size(A))
     I1, Iend = first(R), last(R)
@@ -1338,7 +1353,9 @@ function boxcar(A::AbstractArray, window::AbstractArray)
             out[I] = NaN
         end
         n, s = 0, zero(eltype(out))
-        for J in CartesianRange(max(I1, I-I1*window[I]), min(Iend, I+I1*window[I]))
+        I_l = CartesianIndex(I1.I.*window_lower[I])
+        I_u = CartesianIndex(I1.I.*window_upper[I])
+        for J in CartesianRange(max(I1, I-I_l), min(Iend, I+I_u))
             if !isnan(A[J])
                 s += A[J]
                 n += 1
@@ -1374,22 +1391,27 @@ end
 # end
 
 # this does not drop points which themselves have zero weight, only points on dropmask.
-function boxcar{T,N}(A::AbstractArray{T,N}, window,
+boxcar(A::AbstractArray, window, weights::AbstractArray, dropmask::AbstractArray=(weights.==0)) =
+    boxcar(A, (window,window), weights, dropmask)
+function boxcar{T,N}(A::AbstractArray{T,N}, windows::Tuple,
                      weights::AbstractArray,
                      dropmask::AbstractArray=(weights.==0))
     @assert size(weights)==size(A)
+    window_lower, window_upper = windows
     out = zeros(A)
     # make an accumulator type closed under addition (needed for Bools):
     AT = typeof(one(eltype(weights)) + one(eltype(weights)))
     R = CartesianRange(size(A))
     I1, Iend = first(R), last(R)
+    I_l = CartesianIndex(I1.I.*window_lower)
+    I_u = CartesianIndex(I1.I.*window_upper)
     @inbounds @fastmath for I in R
         if dropmask[I]
             out[I] = A[I]
             continue
         end
         n, s = zero(AT), zero(T)
-        for J in CartesianRange(max(I1, I-I1*window), min(Iend, I+I1*window))
+        for J in CartesianRange(max(I1, I-I_l), min(Iend, I+I_u))
             s += A[J] * convert(T, weights[J])
             n += weights[J]
         end
