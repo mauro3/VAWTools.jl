@@ -11,8 +11,9 @@ include("other-pks-fixes.jl")
 export read_agr, write_agr, read_xyn, inpoly, AGridded, Gridded, Gridded1d, Traj,
     smooth_vector, absslope, gradient3by3,
     downsample, split_traj!, boxcar, boxcar_matrix, apply_boxcar_matrix, bin_grid, piecewiselinear, split_poly,
-    transform_proj
+    transform_proj, max_smooth, min_smooth
 
+include("smoothing-functions.jl")
 
 import Base: ==, size, length, step, +, -, *
 

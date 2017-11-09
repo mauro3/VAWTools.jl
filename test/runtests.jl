@@ -8,6 +8,8 @@ function sha(fn)
     end
 end
 
+include("smoothing-functions.jl")
+
 ## Gridded
 ##########
 g = Gridded(1.:37, 1:17., rand(37,17))
