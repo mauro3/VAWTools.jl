@@ -413,6 +413,19 @@ filt1 = VAWTools.boxcar(orig, window)
 @test size(filt1)==size(orig)
 @test filt1==[2.5, 3.0, 3.5, 4.0, 5.0, 6.0, 7.0, 7.5, 8.0, 8.5]
 
+window = 3.3
+@inferred VAWTools.boxcar(orig, window)
+filt1 = VAWTools.boxcar(orig, window)
+@test size(filt1)==size(orig)
+@test filt1≈[2.67442, 3.16981, 3.66667, 4.16438, 5.0, 6.0, 6.83562, 7.33333, 7.83019, 8.32558] atol=1e-4
+
+windows = (2.4,3.3)
+@inferred VAWTools.boxcar(orig, windows)
+filt1 = VAWTools.boxcar(orig, windows)
+@test size(filt1)==size(orig)
+@test filt1≈[2.67442, 3.16981, 3.66667, 4.44776, 5.44776, 6.44776, 7.28125, 7.77778, 8.27273, 8.76471] atol=1e-4
+
+
 ## 2D
 #nr,nc = 4,5
 T = Float32
@@ -531,6 +544,8 @@ for w in [windows1, windows2]
     @inferred VAWTools.boxcar(orig, w, weights)
     @inferred VAWTools.boxcar(orig, w, weights, dropmask)
 end
+
+@inferred VAWTools.boxcar(orig, (3.3,4.2))
 
 ####
 # piecewiselinear

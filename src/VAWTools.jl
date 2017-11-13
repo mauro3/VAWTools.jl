@@ -1341,6 +1341,45 @@ function boxcar(A::AbstractArray, windows::Tuple)
     end
     out
 end
+function boxcar(A::AbstractArray, windows::Tuple{<:AbstractFloat,<:AbstractFloat})
+    window_lower, window_upper = map(x->floor(Int,x), windows)
+    weight_lower, weight_upper = windows[1]-window_lower, windows[2]-window_upper
+    out = similar(A)
+    # make an accumulator type closed under addition (needed for Bools):
+    R = CartesianRange(size(A))
+    I1, Iend = first(R), last(R)
+    I_l = CartesianIndex(I1.I.*window_lower)
+    I_u = CartesianIndex(I1.I.*window_upper)
+    I_ll = CartesianIndex(I1.I.*(window_lower+1))
+    I_uu = CartesianIndex(I1.I.*(window_upper+1))
+    for I in R # @inbounds does not help
+        out[I] = NaN
+        n, s = zero(eltype(out)), zero(eltype(out))
+        # lower fractional-cells
+        for J in CartesianRange(max(I1, I-I_ll), I-I_l-1)
+            if !isnan(A[J])
+                s += A[J] * weight_lower
+                n += weight_lower
+            end
+        end
+        # normal window
+        for J in CartesianRange(max(I1, I-I_l), min(Iend, I+I_u))
+            if !isnan(A[J])
+                s += A[J]
+                n += 1
+            end
+        end
+        # upper fractional-cells
+        for J in CartesianRange(I+I_u+1, min(Iend, I+I_uu))
+            if !isnan(A[J])
+                s += A[J] * weight_upper
+                n += weight_upper
+            end
+        end
+        out[I] = s/n
+    end
+    out
+end
 function boxcar(A::AbstractArray, windows::Tuple{<:AbstractArray, <:AbstractArray})
     window_lower, window_upper = windows
     out = similar(A)
