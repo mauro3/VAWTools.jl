@@ -1,5 +1,4 @@
 __precompile__() # RasterIO is not pre-compiled
-warn("BREAKING CHANGE: The Gridded, Gridded1d and Traj interface was overhauled.")
 
 module VAWTools
 using Compat
@@ -1330,9 +1329,7 @@ function boxcar(A::AbstractArray, windows::Tuple)
     I_l = CartesianIndex(I1.I.*window_lower)
     I_u = CartesianIndex(I1.I.*window_upper)
     for I in R # @inbounds does not help
-        if !isnan(A[I])
-            out[I] = NaN
-        end
+        out[I] = NaN
         n, s = 0, zero(eltype(out))
         for J in CartesianRange(max(I1, I-I_l), min(Iend, I+I_u))
             if !isnan(A[J])
@@ -1350,9 +1347,7 @@ function boxcar(A::AbstractArray, windows::Tuple{<:AbstractArray, <:AbstractArra
     R = CartesianRange(size(A))
     I1, Iend = first(R), last(R)
     for I in R # @inbounds does not help
-        if !isnan(A[I])
-            out[I] = NaN
-        end
+        out[I] = NaN
         n, s = 0, zero(eltype(out))
         I_l = CartesianIndex(I1.I.*window_lower[I])
         I_u = CartesianIndex(I1.I.*window_upper[I])
