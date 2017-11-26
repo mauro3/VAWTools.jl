@@ -332,7 +332,7 @@ function Gridded{T}(agr::AGR{T}; NA=convert(T,NaN))
             if isequal(v[i], agr.NA); v[i] = NA end
         end
     end
-    proj = agr.hasutm ? "+proj=utm +zone=$(agr.NA)" : ""
+    proj = agr.hasutm ? "+proj=utm +zone=$(Int(agr.NA))" : ""
     Gridded(range(agr.xll+agr.dx/2, agr.dx, agr.nc),
             range(agr.yll+agr.dx/2, agr.dx, agr.nr),
             v,
@@ -375,25 +375,32 @@ Optional keywords:
 Out: Gridded
 """
 function read_agr(fl, T=Float32; NA=convert(T,NaN))
-    Gridded(_read_agr(fl, T, NA), NA=NA)::Gridded{T}
+    agr = _read_agr(fl, T)
+    @unpack v, hasutm = agr
+    NA_old = agr.NA
+    # replace missing value with something else
+    if !hasutm && NA_old!=NA
+        _refill!(v, NA_old, NA)
+    end
+    Gridded(agr)::Gridded{T}
 end
 
-function _read_agr(fl::AbstractString, T=Float32, NA=nothing)
+function _read_agr(fl::AbstractString, T=Float32)
     if !isfile(fl)
         error("File $fl does not exist!")
     end
     if endswith(fl, ".gz")
         @eval import CodecZlib
-        io = CodecZlib.GzipDecompressionStream(open(fl))
+        io = CodecZlib.GzipDecompressorStream(open(fl))
     else
         io = open(fl, "r")
     end
-    out = _read_agr(io, T, NA)
+    out = _read_agr(io, T)
     close(io)
     return out
 end
 
-function _read_agr(io::IO, T=Float32, NA=nothing)
+function _read_agr(io::IO, T=Float32)
     if isbin_file(io)
         toT = (io,T) -> convert(T, read(io, Float32))
     else
@@ -448,10 +455,6 @@ function _read_agr(io::IO, T=Float32, NA=nothing)
             va[i,j] = parse(T, tmp[(i-1)*nc + j])
         end
     end
-    # replace missing value with something else
-    if NA!=nothing && fill!=NA && hasutm
-        fill = _refill!(va, fill, NA)
-    end
     # make a AGR data structure
     AGR(va, nc, nr, xll, yll, dx, fill, hasutm, extra_header)
 end
@@ -465,6 +468,43 @@ function _refill!(a::Array, oldfill, newfill)
     newfill
 end
 
+"""
+    get_utm_asciigrid(fl_or_io)
+
+Get the UTM zone of an ASCII-grid file (a unofficial format change used by Matthias).
+
+If there is no zone return "".
+"""
+function get_utm_asciigrid(fl)
+    open(fl) do io
+        get_utm_asciigrid(io)
+    end
+end
+function get_utm_asciigrid(io::IO)
+    T = Float32
+    if isbin_file(io)
+        return ""
+        # error("Ascii-bin files cannot have UTM")
+    else
+        toT = (io,T) -> parse(T, split(readline(io))[2])
+    end
+
+    # read header
+    _ = toT(io, Int)
+    _ = toT(io, Int)
+    _ = toT(io,T)
+    _ = toT(io,T)
+    _ = toT(io,T)
+    # Matthias sometimes abuses the NODATA_value field as UTM-zone field
+    # in non-binary grids:
+    prop, val = split(readline(io))
+    if lowercase(prop)=="nodata_value"
+        return ""
+        # error("No field UTM_ZONE found")
+    end
+    utm = parse(Int,val)
+    return "+proj=utm +zone=$(utm)"
+end
 
 """Write Ascii grid.
 
@@ -915,10 +955,10 @@ end
 
 
 ########
-"""
-Convert int to string and pad with 0 to get to len
-"""
+"Convert int to string and pad with 0 to get to length 5"
 int2str5(i) = @sprintf "%05d" i
+"Convert int to string and pad with 0 to get to length 2bed"
+int2str2(i) = @sprintf "%02d" i
 
 """
 Represents an array all filled with one value.
