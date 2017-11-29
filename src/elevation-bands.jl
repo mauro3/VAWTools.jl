@@ -47,6 +47,7 @@ function make_1Dglacier(dem::Gridded, binsize_or_bins, glaciermask=trues(size(de
     end
     # no FILL inside glaciermask
     @assert !any(dem.v[glaciermask].==FILL)
+    @assert !any(isnan.(dem.v[glaciermask]))
 
     # 2D slopes
     ret_nans = false
@@ -213,6 +214,7 @@ function bin_grid(v::Matrix, binsize_or_bins, mask=BitArray([]); binround=_binro
             binstart = ceil(ma, binround)
             binend = ceil(mi, binround) # better: `ceil(ma, binround) - binsize_or_bins` ?
         end
+        @assert !isnan(binstart) && !isnan(binend)
         bins = binstart:binsize_or_bins:binend # these are the start of the bins
     else
         bins = binsize_or_bins
@@ -289,7 +291,8 @@ Input:
 - fill -- fill value, if set, ignore those points
 
 Output
-- the value of the field on the bands
+- the value of the field on the bands.  If no values were found in a band,
+  then return NaN.
 """
 function map_onto_bands(bandi, field::Matrix, fn=mean, fill=nothing)
     resT = typeof(fn(field[bandi[1]])) # to get result type
@@ -815,6 +818,7 @@ function _calc_u(q1d, boundaries, u_trial, thick,
         else # outflow at terminus
             # TODO: this probably needs updating where several elevation bands contribute (tide-water)
             # -> no, only ever the last band does outflow
+            @show keys(bnd)
             bb = get(bnd, -1, bnd[0]) # if sea-terminating use those edges.
         end
         # loop over segments

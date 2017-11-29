@@ -327,12 +327,17 @@ default assumes AGR-no-value==NaN.  Moves (x,y)-coords to midpoints
 function Gridded{T}(agr::AGR{T}; NA=convert(T,NaN))
     #    v = my_rotr90(agr.v)
     v = rotr90(agr.v)
-    if !isequal(NA, agr.NA)
-        for i=eachindex(v)
-            if isequal(v[i], agr.NA); v[i] = NA end
+    if agr.hasutm
+        proj = "+proj=utm +zone=$(Int(agr.NA))"
+    else
+        # only swap NA if it has a FILL value:
+        if !isequal(NA, agr.NA)
+            for i=eachindex(v)
+                if isequal(v[i], agr.NA); v[i] = NA end
+            end
         end
+        proj = ""
     end
-    proj = agr.hasutm ? "+proj=utm +zone=$(Int(agr.NA))" : ""
     Gridded(range(agr.xll+agr.dx/2, agr.dx, agr.nc),
             range(agr.yll+agr.dx/2, agr.dx, agr.nr),
             v,
@@ -863,7 +868,7 @@ end
 #         error("No AUTHORITY entry found in well-known-text")
 #     end
 #     endpos = search(wkt[auth[end]+1:end], "]")[1]
-#   @show  li = eval(parse(wkt[auth[end]+1:auth[end]+endpos]))
+#     li = eval(parse(wkt[auth[end]+1:auth[end]+endpos]))
 #     nr = parse(Int, li[2])
 #     if li[1]=="EPSG"
 #         return Proj4.epsg[nr]
@@ -1351,7 +1356,7 @@ If desired, a different window can be specified for each point.  Then
 pass an array of same size as A as window.
 
 For the weights it may be faster to use non-Bool arrays nor BitArrays,
-say Int8.  Note that even NaNs where weight==0 will poison the result!
+say Int8.  Note that NaNs where weight==0 will not poison the result.
 
 No average is calculated for points where dropmask==true, instead
 their original value will be used.
@@ -1480,17 +1485,24 @@ function boxcar{T,N}(A::AbstractArray{T,N}, windows::Tuple,
     I1, Iend = first(R), last(R)
     I_l = CartesianIndex(I1.I.*window_lower)
     I_u = CartesianIndex(I1.I.*window_upper)
-    @inbounds @fastmath for I in R
+    @inbounds for I in R
         if dropmask[I]
             out[I] = A[I]
-            continue
+        else
+            n, s = zero(AT), zero(T)
+            for J in CartesianRange(max(I1, I-I_l), min(Iend, I+I_u))
+                AJ, w = A[J], weights[J]
+                if !isnan(AJ)
+                    s += AJ * convert(T, w)
+                    n += w
+                end
+            end
+            if n==0
+                error()
+            else
+                out[I] = s/n
+            end
         end
-        n, s = zero(AT), zero(T)
-        for J in CartesianRange(max(I1, I-I_l), min(Iend, I+I_u))
-            s += A[J] * convert(T, weights[J])
-            n += weights[J]
-        end
-        out[I] = s/n
     end
     out
 end
