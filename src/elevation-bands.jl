@@ -818,7 +818,6 @@ function _calc_u(q1d, boundaries, u_trial, thick,
         else # outflow at terminus
             # TODO: this probably needs updating where several elevation bands contribute (tide-water)
             # -> no, only ever the last band does outflow
-            @show keys(bnd)
             bb = get(bnd, -1, bnd[0]) # if sea-terminating use those edges.
         end
         # loop over segments
