@@ -1343,8 +1343,8 @@ end
     boxcar(A::AbstractArray, windows::Tuple, [, weights, dropmask])
     boxcar(A::AbstractArray, window::AbstractArray, [, weights, dropmask])
 
-Boxcar filter.  The two argument call ignores NaNs.  The three & four
-argument call uses weights instead of NaNs, it can be a lot faster.
+Boxcar filter.  The two argument call skips NaNs.  The three & four
+argument call uses weights and propagates NaNs, it can be a lot faster.
 
 Smoothing occurs over +/-window indices, 0 corresponds to no smoothing.
 The window can be specified as:
@@ -1492,13 +1492,14 @@ function boxcar{T,N}(A::AbstractArray{T,N}, windows::Tuple,
             n, s = zero(AT), zero(T)
             for J in CartesianRange(max(I1, I-I_l), min(Iend, I+I_u))
                 AJ, w = A[J], weights[J]
-                if !isnan(AJ)
-                    s += AJ * convert(T, w)
-                    n += w
-                end
+                # if !isnan(AJ)
+                s += AJ * convert(T, w)
+                n += w
+                # end
             end
             if n==0
-                error()
+                #error("At location $I no contributing cells found")
+                out[I] = NaN
             else
                 out[I] = s/n
             end
@@ -1515,7 +1516,9 @@ This produces a sparse matrix which can be used to apply the filter:
 `bx*hs2d`. Relatively expensive to create but very fast to apply, thus
 use when needing the same filter several times.
 
-Note, that here NaNs where weight==0 do not poison the result.
+Notes:
+- here NaNs where weight==0 do not poison the result.
+- therefore applying the matrix may not be 100% identical to just doing boxcar(...)
 
 Apply with
 

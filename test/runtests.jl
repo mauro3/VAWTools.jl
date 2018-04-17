@@ -629,8 +629,6 @@ bands_g, bandi_g, malphas, areas, lengths, widths, x, xmid, dem, alpha2d =
 ###############
 # Fluxes
 ###############
-using Base.Test, VAWTools
-
 tmp       = [14 14 15 15 16 17 18 18 19 0 0 0;
              14 14 15 15 16 17 18 19 19 0 0 0;
              14 15 15 16 16 17 18 19 19 0 0 0;
