@@ -1,5 +1,3 @@
-__precompile__() # RasterIO is not pre-compiled
-
 module VAWTools
 using Parameters
 
@@ -183,7 +181,7 @@ There are constructors to leave off v, err, splits and proj.
     splits::Vector{UnitRange{Int}}=UnitRange{Int}[1:length(x)]
     proj::String="" # Proj4 string
 end
-Traj(x,y) = Traj{Void}(x,y,Void[],Void[],UnitRange{Int}[1:length(x)],"")
+Traj(x,y) = Traj{Nothing}(x,y,Nothing[],Nothing[],UnitRange{Int}[1:length(x)],"")
 Traj(x,y,v::AV) where AV<:AbstractVector{T} where T = Traj{T}(x,y,v,T[],UnitRange{Int}[1:length(x)],"")
 Traj(x,y,v::AV,err) where AV<:AbstractVector{T} where T = Traj{T}(x,y,v,err,UnitRange{Int}[1:length(x)],"")
 Traj(x,y,v::AV,err,splits) where AV<:AbstractVector{T} where T = Traj{T}(x,y,v,err,splits,"")
@@ -444,14 +442,14 @@ function _read_agr(io::IO, T=Float32)
             error("Not implemented yet")
         end
         if !eof(io)
-            warn("End-of-file was not reached!")
+            @warn("End-of-file was not reached!")
         end
     else
         va = Array{T}(nr, nc)
         # no extra header for ascii .agr
         extra_header = zeros(Float32, 6)
         # read values
-        tmp = split(readstring(io))
+        tmp = split(read(io, String))
         if length(tmp)!=nc*nr
             error("Something's wrong with the file/stream $io.  It should contain $(nc*nr) values but has $(length(tmp))")
         end
@@ -952,7 +950,7 @@ function dist_longlat(lon1,lat1,lon2,lat2,R=6373) # the radius of the Earth
     lat1 = deg2rad(lat1)
     lat2 = deg2rad(lat2)
     a = (sin(dlat/2))^2 + cos(lat1) * cos(lat2) * (sin(dlon/2))^2
-    c = 2 * atan2( sqrt(a), sqrt(1-a) )
+    c = 2 * atan( sqrt(a), sqrt(1-a) )
     return R * c
 end
 
@@ -1083,7 +1081,7 @@ Note: slope and angle are very similar up to about ~0.4 or 20deg
 """
 absslope(g::Gridded,weights::AbstractMatrix=UniformArray{Bool,2}(true),retnan=true) =
     absslope(g.x,g.y,g.v,weights,retnan)
-function absslope(x::Range,y::Range,v,weights::AbstractMatrix=UniformArray{Bool,2}(true),retnan=true)
+function absslope(x::AbstractRange,y::AbstractRange,v,weights::AbstractMatrix=UniformArray{Bool,2}(true),retnan=true)
     dvx,dvy = gradient3by3(x,y,v,weights,retnan)
     for i in eachindex(dvx)
         dvx[i] = atan(sqrt(dvx[i]^2+dvy[i]^2))
@@ -1158,7 +1156,7 @@ Reference: gradient3by3_fast
 gradient3by3(g::Gridded,weights::AbstractMatrix=UniformArray{Bool,2}(true),retnan=true) =
     gradient3by3(g.x,g.y,g.v,weights,retnan)
 # Implementation using weights: drops pairs which don't work.
-function gradient3by3(x::Range,y::Range,v,weights::AbstractMatrix=UniformArray{Bool,2}(true),retnan=true)
+function gradient3by3(x::AbstractRange,y::AbstractRange,v,weights::AbstractMatrix=UniformArray{Bool,2}(true),retnan=true)
     nx, ny = length(x),length(y)
     dx = step(x)
     dvx = zeros(Float64, nx, ny)
@@ -1231,7 +1229,7 @@ end
 
 "Faster than gradient3by3 but does not deal with weights nor the edge."
 gradient3by3_fast(g::Gridded) = gradient3by3_fast(g.x,g.y,g.v)
-function gradient3by3_fast(x::Range,y::Range,v)
+function gradient3by3_fast(x::AbstractRange,y::AbstractRange,v)
     nx, ny = length(x),length(y)
     dx = step(x)
     dvx = zeros(Float64, nx, ny)
@@ -1368,14 +1366,14 @@ boxcar(A::AbstractArray, window) = boxcar(A, (window,window))
 function boxcar(A::AbstractArray, windows::Tuple)
     window_lower, window_upper = windows
     out = similar(A)
-    R = CartesianRange(size(A))
+    R = CartesianIndices(size(A))
     I1, Iend = first(R), last(R)
     I_l = CartesianIndex(I1.I.*window_lower)
     I_u = CartesianIndex(I1.I.*window_upper)
     for I in R # @inbounds does not help
         out[I] = NaN
         n, s = 0, zero(eltype(out))
-        for J in CartesianRange(max(I1, I-I_l), min(Iend, I+I_u))
+        for J in CartesianIndices(max(I1, I-I_l), min(Iend, I+I_u))
             if !isnan(A[J])
                 s += A[J]
                 n += 1
@@ -1390,7 +1388,7 @@ function boxcar(A::AbstractArray, windows::Tuple{<:AbstractFloat,<:AbstractFloat
     weight_lower, weight_upper = windows[1]-window_lower, windows[2]-window_upper
     out = similar(A)
     # make an accumulator type closed under addition (needed for Bools):
-    R = CartesianRange(size(A))
+    R = CartesianIndices(size(A))
     I1, Iend = first(R), last(R)
     I_l = CartesianIndex(I1.I.*window_lower)
     I_u = CartesianIndex(I1.I.*window_upper)
@@ -1400,21 +1398,21 @@ function boxcar(A::AbstractArray, windows::Tuple{<:AbstractFloat,<:AbstractFloat
         out[I] = NaN
         n, s = zero(eltype(out)), zero(eltype(out))
         # lower fractional-cells
-        for J in CartesianRange(max(I1, I-I_ll), I-I_l-1)
+        for J in CartesianIndices(max(I1, I-I_ll), I-I_l-1)
             if !isnan(A[J])
                 s += A[J] * weight_lower
                 n += weight_lower
             end
         end
         # normal window
-        for J in CartesianRange(max(I1, I-I_l), min(Iend, I+I_u))
+        for J in CartesianIndices(max(I1, I-I_l), min(Iend, I+I_u))
             if !isnan(A[J])
                 s += A[J]
                 n += 1
             end
         end
         # upper fractional-cells
-        for J in CartesianRange(I+I_u+1, min(Iend, I+I_uu))
+        for J in CartesianIndices(I+I_u+1, min(Iend, I+I_uu))
             if !isnan(A[J])
                 s += A[J] * weight_upper
                 n += weight_upper
@@ -1427,14 +1425,14 @@ end
 function boxcar(A::AbstractArray, windows::Tuple{<:AbstractArray, <:AbstractArray})
     window_lower, window_upper = windows
     out = similar(A)
-    R = CartesianRange(size(A))
+    R = CartesianIndices(size(A))
     I1, Iend = first(R), last(R)
     for I in R # @inbounds does not help
         out[I] = NaN
         n, s = 0, zero(eltype(out))
         I_l = CartesianIndex(I1.I.*window_lower[I])
         I_u = CartesianIndex(I1.I.*window_upper[I])
-        for J in CartesianRange(max(I1, I-I_l), min(Iend, I+I_u))
+        for J in CartesianIndices(max(I1, I-I_l), min(Iend, I+I_u))
             if !isnan(A[J])
                 s += A[J]
                 n += 1
@@ -1480,7 +1478,7 @@ function boxcar(A::AbstractArray{T,N}, windows::Tuple,
     out = zeros(A)
     # make an accumulator type closed under addition (needed for Bools):
     AT = typeof(one(eltype(weights)) + one(eltype(weights)))
-    R = CartesianRange(size(A))
+    R = CartesianIndices(size(A))
     I1, Iend = first(R), last(R)
     I_l = CartesianIndex(I1.I.*window_lower)
     I_u = CartesianIndex(I1.I.*window_upper)
@@ -1537,7 +1535,7 @@ function boxcar_matrix(::Type{T}, window::Integer,
     sizehint!(is, 2*window*nr*nc)
     sizehint!(js, 2*window*nr*nc)
     sizehint!(vs, 2*window*nr*nc)
-    R = CartesianRange(size(weights))
+    R = CartesianIndices(size(weights))
     I1, Iend = first(R), last(R)
     @inbounds @fastmath for I in R
         i = (I.I[2]-1)*nr + I.I[1] # row of output matrix

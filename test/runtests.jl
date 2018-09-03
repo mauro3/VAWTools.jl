@@ -1,5 +1,5 @@
 using VAWTools
-using Base.Test
+using Test
 using SHA, Compat
 
 function sha(fn)
@@ -152,7 +152,7 @@ tr = Traj(1.0:5, 6.0:10)
 @test !VAWTools.haserror(tr)
 @test !VAWTools.hasvalues(tr)
 
-tr = Traj(1.0:5, 6.0:10, Void[], Void[], [1:3,4:5])
+tr = Traj(1.0:5, 6.0:10, Nothing[], Nothing[], [1:3,4:5])
 @test tr.x==collect(1.0:5)
 @test tr.y==collect(6.0:10)
 @test tr.splits==[1:3,4:5]
@@ -432,7 +432,7 @@ nr,nc = 20,31
 window = 3
 # orig = (1.0:nr)''*(1:nc)'
 # weights = ones(Int,nr,nc)
-srand(1)
+Random.seed!(1)
 orig = rand(T,nr,nc)
 weights = rand(nr,nc)
 weightsb = bitrand(nr,nc)
@@ -534,7 +534,7 @@ end
 windows1 = (3,4)
 windows2 = ((2,3), (1,2))
 
-srand(1)
+Random.seed!(1)
 orig = rand(T,nr,nc)
 
 for w in [windows1, windows2]

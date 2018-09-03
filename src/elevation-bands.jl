@@ -202,17 +202,17 @@ function bin_grid(v::Matrix, binsize_or_bins, mask=BitArray([]); binround=_binro
     else
         @assert size(mask)==size(v)
         v = v[mask]
-        ginds = find(mask[:])
+        ginds = findall(mask[:])
     end
     nv = length(v)
     if isa(binsize_or_bins, Number) # i.e. a binsize
         mi, ma = minimum(v), maximum(v)
         if binsize_or_bins>=0
-            binstart = floor(mi, binround)
-            binend = floor(ma, binround) # better: `ceil(ma, binround) - binsize_or_bins` ?
+            binstart = floor(mi, digits=binround)
+            binend = floor(ma, digits=binround) # better: `ceil(ma, binround) - binsize_or_bins` ?
         else
-            binstart = ceil(ma, binround)
-            binend = ceil(mi, binround) # better: `ceil(ma, binround) - binsize_or_bins` ?
+            binstart = ceil(ma, digits=binround)
+            binend = ceil(mi, digits=binround) # better: `ceil(ma, binround) - binsize_or_bins` ?
         end
         @assert !isnan(binstart) && !isnan(binend)
         bins = binstart:binsize_or_bins:binend # these are the start of the bins
@@ -264,13 +264,13 @@ function bin_traj(tr::Traj, g::Gridded, binsize_or_bins, mask=trues(size(g.v)); 
     v = [demi[x,y] for (x,y) in zip(tr.x,tr.y)]
     vm = Bool[maski[x,y] for (x,y) in zip(tr.x,tr.y)]
     v = v[vm]
-    ginds = find(vm)
+    ginds = findall(vm)
     nv = length(v)
 
     if isa(binsize_or_bins, Number)
         mi, ma = minimum(v), maximum(v)
-        binstart = floor(mi, binround)
-        binend = floor(ma, binround)
+        binstart = floor(mi, digits=binround)
+        binend = floor(ma, digits=binround)
         bins = binstart:binsize_or_bins:binend # these are the start of the bins
     else
         bins = binsize_or_bins
@@ -700,11 +700,11 @@ function calc_fluxdir(l::Line, ux, uy, window, dx, bands)
     ii = zeros(Int,ne)
     jj = zeros(Int,ne)
 
-    R = CartesianRange(size(edges))
+    R = CartesianIndices(size(edges))
     I1, Iend = first(R), last(R)
     for I in R
         fx, fy = 0.0, 0.0
-        for J in CartesianRange(max(I1, I-I1*window), min(Iend, I+I1*window))
+        for J in CartesianIndices(max(I1, I-I1*window), min(Iend, I+I1*window))
             i,j,loc = edges[J].i, edges[J].j, edges[J].loc
             # average ux,uy in the two cells
             if loc==left
