@@ -1,7 +1,6 @@
 __precompile__() # RasterIO is not pre-compiled
 
 module VAWTools
-using Compat
 using Parameters
 
 include("other-pks-fixes.jl")
