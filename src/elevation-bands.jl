@@ -419,7 +419,7 @@ One cell-edge of a regular gird of cells.
 TODO:
 Arguably not the best datastructure for what is done below.
 """
-immutable Edge
+struct Edge
     i::Int # cell ind
     j::Int # cell ind
     loc::Loc
@@ -481,7 +481,7 @@ A line made up of a continuous (and sorted) collection of edges.
 
 Also, the line has an orientation: the (i,j) cell lies on the "right" of the edge.
 """
-immutable Line
+struct Line
     edges::Vector{Edge}
 end
 #Base.show(io::IO,l::Line) = show(io, l.edges)

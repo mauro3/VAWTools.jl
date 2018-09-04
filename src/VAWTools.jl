@@ -18,7 +18,7 @@ import Base: ==, size, length, step, +, -, *
 
 # const spatialorder = "yx"  # order of imagestorage, https://github.com/timholy/Images.jl#storage-order-and-changing-the-representation-of-images
 
-@compat abstract type AGridded{T} end
+abstract type AGridded{T} end
 "Check whether an error-field is defined."
 haserror(g::AGridded) = size(g.err)!=(0,0)
 hasproj(g::AGridded) = g.proj!=""
@@ -199,7 +199,7 @@ length(g::Traj) = length(g.x)
 
 Splits trajectory into several
 """
-function split_traj!{T<:Traj}(t::T, dist)
+function split_traj!(t::T, dist) where T<:Traj
     ii = 1
     empty!(t.splits)
     for i=1:length(t.x)-1
@@ -213,7 +213,7 @@ function split_traj!{T<:Traj}(t::T, dist)
 end
 
 
-function Base.convert{T2,T1}(::Type{Traj{T2}}, g::Traj{T1})
+function Base.convert(::Type{Traj{T2}}, g::Traj{T1}) where {T2,T1}
     if typeof(g)==Traj{T2}
         return g
     end
@@ -230,7 +230,7 @@ below.  In general use Gridded.
 
 Ref: https://en.wikipedia.org/wiki/Esri_grid
 """
-immutable AGR{T} # Ascii GRid
+struct AGR{T} # Ascii GRid
     v::Matrix{T}    # values: orientation is awkward, as in the AGR file, see https://en.wikipedia.org/wiki/Esri_grid
     nc::Int64       # NCOLS TODO: remove those
     nr::Int64       # NROWS
@@ -241,14 +241,14 @@ immutable AGR{T} # Ascii GRid
     hasutm::Bool    # Matthias sometimes abuses the NODATA_value field as UTM-zone field
     extra_header::Vector{Float32} # the .bin files have space for
                                   # extra information in the header
-    function (::Type{AGR{T}}){T}(va, nc, nr, xll, yll, dx, NA,
-                                 hasutm=false, extra_header=zeros(Float32,6))
+    function AGR{T}(va, nc, nr, xll, yll, dx, NA,
+                    hasutm=false, extra_header=zeros(Float32,6)) where T
         @assert size(va)==(nr,nc)
         @assert dx>=0
         new{T}(va, nc, nr, xll, yll, dx, NA, hasutm, extra_header)
     end
 end
-AGR{T}(va::Matrix{T}, nc, nr, xll, yll, dx, NA, hasutm=false, extra_header=zeros(Float32,6)) = AGR{T}(va, nc, nr, xll, yll, dx, NA, hasutm, extra_header)
+AGR(va::Matrix{T}, nc, nr, xll, yll, dx, NA, hasutm=false, extra_header=zeros(Float32,6)) where {T} = AGR{T}(va, nc, nr, xll, yll, dx, NA, hasutm, extra_header)
 
 """
 Transform Gridded to AGR
@@ -260,7 +260,7 @@ Optional:
 - write_err: write g.err instead of g.v
 
 """
-function AGR{T}(g::Gridded{T}; NA_g=convert(T,NaN), NA_agr=convert(T,NaN), write_err=false, utmzone=0)
+function AGR(g::Gridded{T}; NA_g=convert(T,NaN), NA_agr=convert(T,NaN), write_err=false, utmzone=0) where T
     v = write_err ? g.err : g.v # whether to write the values or errors into the ascii grid
     if 0<utmzone<61
         hasutm = true
@@ -324,7 +324,7 @@ end
 Construct Gridded from AGR.  Replace AGR-no-value NA with NaN.  By
 default assumes AGR-no-value==NaN.  Moves (x,y)-coords to midpoints
 """
-function Gridded{T}(agr::AGR{T}; NA=convert(T,NaN))
+function Gridded(agr::AGR{T}; NA=convert(T,NaN)) where T
     #    v = my_rotr90(agr.v)
     v = rotr90(agr.v)
     if agr.hasutm
@@ -526,12 +526,12 @@ Optional:
 - write_err: write g.err instead of g.v
 - T: choose output type: Int or Float (only for ASCII files)
 """
-function write_agr{T_}(g::Gridded{T_}, fn::AbstractString; T=T_, NA_g=convert(T_,NaN), NA_agr=convert(T,NaN), write_err=false)
+function write_agr(g::Gridded{T_}, fn::AbstractString; T=T_, NA_g=convert(T_,NaN), NA_agr=convert(T,NaN), write_err=false) where T_
     write_agr(AGR(g, NA_g=NA_g, NA_agr=NA_agr, write_err=write_err), fn, T=T)
 end
 
 # setting NA will transform the NA value to that
-function write_agr{T_}(g::AGR{T_}, fn::AbstractString; NA=nothing, T=T_)
+function write_agr(g::AGR{T_}, fn::AbstractString; NA=nothing, T=T_) where T_
     if !isbin_file(fn)
         ext = splitext(fn)[2]
         if ext==".grid" || ext==".asc"
@@ -753,7 +753,7 @@ function find_poly_splits(bigpoly::Matrix)
 end
 
 "Split up concatenated polygon."
-function split_poly{T}(bigpoly::Matrix{T}, splits)
+function split_poly(bigpoly::Matrix{T}, splits) where T
     out = Matrix{T}[]
     if length(splits)==0
         return out
@@ -974,16 +974,16 @@ https://github.com/JuliaLang/julia/blob/86bf95fe0a76e4750d41f569bfcb6fa1fb1805e4
 TODO:
 - arithmetic
 """
-immutable UniformArray{T,N} <: AbstractArray{T,N}
+struct UniformArray{T,N} <: AbstractArray{T,N}
     val::T
 end
-Base.size{T,N}(::UniformArray{T,N}) = ntuple(x->typemax(Int), Val{N})
+Base.size(::UniformArray{T,N}) where {T,N} = ntuple(x->typemax(Int), Val{N})
 Base.getindex(A::UniformArray, i::Int) = A.val
-@compat Base.IndexStyle{U<:UniformArray}(::Type{U}) = IndexLinear()
+Base.IndexStyle(::Type{U}) where {U<:UniformArray} = IndexLinear()
 Base.start(::UniformArray) = error("Cannot iterate over UniformArray")
 # Does not work https://github.com/JuliaLang/julia/issues/18004
 #Base.show{T,N}(io::IO, u::UniformArray{T,N}) = print(io, "UniformArray{$T,$N} with value $(u.val)")
-Base.show{T,N}(io::IO, ::MIME"text/plain", u::UniformArray{T,N}) = print(io, "UniformArray{$T,$N} with value $(u.val)")
+Base.show(io::IO, ::MIME"text/plain", u::UniformArray{T,N}) where {T,N} = print(io, "UniformArray{$T,$N} with value $(u.val)")
 
 #############
 # Polygons
@@ -1473,9 +1473,9 @@ end
 # this does not drop points which themselves have zero weight, only points on dropmask.
 boxcar(A::AbstractArray, window, weights::AbstractArray, dropmask::AbstractArray=(weights.==0)) =
     boxcar(A, (window,window), weights, dropmask)
-function boxcar{T,N}(A::AbstractArray{T,N}, windows::Tuple,
-                     weights::AbstractArray,
-                     dropmask::AbstractArray=(weights.==0))
+function boxcar(A::AbstractArray{T,N}, windows::Tuple,
+                weights::AbstractArray,
+                dropmask::AbstractArray=(weights.==0)) where {T,N}
     @assert size(weights)==size(A)
     window_lower, window_upper = windows
     out = zeros(A)
@@ -1524,9 +1524,9 @@ Apply with
 
     apply_boxcar_matrix(M, orig)
 """
-function boxcar_matrix{T,TT,N}(::Type{T}, window::Integer,
-                               weights::AbstractArray{TT,N},
-                               dropmask::AbstractArray=(weights.==0))
+function boxcar_matrix(::Type{T}, window::Integer,
+                       weights::AbstractArray{TT,N},
+                       dropmask::AbstractArray=(weights.==0)) where {T,TT,N}
                                # dropmask::AbstractArray=BitArray{N}(ntuple(x->0, Val{N})...))
     # make an accumulator type closed under addition (needed for Ints and Bools):
     Tacc = promote_type(T, eltype(weights))
@@ -1659,7 +1659,7 @@ Notes:
 - if len=0 no smoothing occurs
 - better than boxcar if having no edge-effects is important
 """
-function smooth_vector{T}(x, y::AbstractVector{T}, len, out=y)
+function smooth_vector(x, y::AbstractVector{T}, len, out=y) where T
     if len==0 && out==y
         return y
     else

@@ -281,9 +281,7 @@ poly = Float64[0  1  1  0  0
 poly = Float64[ 0  1  0  1  0
                 0  0  1  1  0]
 
-if VERSION>=v"0.5-"
-    eval(:(@test_broken inpoly(p1, poly) )) # should be true
-end
+eval(:(@test_broken inpoly(p1, poly) )) # should be true
 @test inpoly(p2, poly)
 @test !inpoly(p22, poly)
 @test !inpoly(p22_, poly)
