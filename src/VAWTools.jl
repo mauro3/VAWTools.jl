@@ -188,6 +188,23 @@ Traj(x,y) = Traj{Void}(x,y,Void[],Void[],UnitRange{Int}[1:length(x)],"")
 Traj(x,y,v::AV) where AV<:AbstractVector{T} where T = Traj{T}(x,y,v,T[],UnitRange{Int}[1:length(x)],"")
 Traj(x,y,v::AV,err) where AV<:AbstractVector{T} where T = Traj{T}(x,y,v,err,UnitRange{Int}[1:length(x)],"")
 Traj(x,y,v::AV,err,splits) where AV<:AbstractVector{T} where T = Traj{T}(x,y,v,err,splits,"")
+function Traj(t::Traj, inds::Vector{Int})
+    x,y,v,err,splits = similar(t.x,0), similar(t.y,0), similar(t.v,0), similar(t.err,0), similar(t.splits,0)
+    s1 = length(x)
+    for i in inds
+        append!(x, t.x[t.splits[i]])
+        append!(y, t.y[t.splits[i]])
+        if length(t.v)>0
+            append!(v, t.v[t.splits[i]])
+        end
+        if length(t.err)>0
+            append!(err, t.err[t.splits[i]])
+        end
+        push!(splits, s1+1:length(x))
+        s1 = length(x)
+    end
+    Traj(x,y,v,err,splits,t.proj)
+end
 
 hasvalues(g::Traj) = length(g.v)!=0
 haserror(g::Traj) = length(g.err)!=0
@@ -197,7 +214,7 @@ length(g::Traj) = length(g.x)
 """
     split_traj!{T<:Traj}(t::T, dist)
 
-Splits trajectory into several
+Splits trajectory into several between points farther apart than `dist`.
 """
 function split_traj!{T<:Traj}(t::T, dist)
     ii = 1
@@ -328,7 +345,7 @@ function Gridded{T}(agr::AGR{T}; NA=convert(T,NaN))
     #    v = my_rotr90(agr.v)
     v = rotr90(agr.v)
     if agr.hasutm
-        proj = "+proj=utm +zone=$(Int(agr.NA))"
+        proj = "+proj=utm +zone=$(Int(agr.NA)) +datum=WSG84"
     else
         # only swap NA if it has a FILL value:
         if !isequal(NA, agr.NA)
@@ -508,7 +525,7 @@ function get_utm_asciigrid(io::IO)
         # error("No field UTM_ZONE found")
     end
     utm = parse(Int,val)
-    return "+proj=utm +zone=$(utm)"
+    return "+proj=utm +zone=$(utm) +datum=WGS84"
 end
 
 """Write Ascii grid.
@@ -710,14 +727,29 @@ returns indices where to split apart again.  The concatenated polygon
 is fully connected, with an edge going back to the first point.  This
 allows to use `inpoly`, at least if the inner polygons have different
 orientation to the outer. Also note that the input and output polygons
-are closed, i.e. last point == first point.
+are closed, i.e. last point == first point (this can be fixed by setting
+the option `close_poly=true`)
+
 
 Return:
 - bigpoly -- with size==(2,n)
 - splits -- ith poly has indices splits[i]:splits[i+1]-1
 """
-function concat_poly(mpoly::Vector)
+function concat_poly(mpoly::Vector; close_poly=false)
     T = eltype(mpoly[1])
+    # check that they are all closed
+    if close_poly
+        mpoly = deepcopy(mpoly)
+    end
+    for i=1:length(mpoly)
+        if mpoly[i][:,1]!=mpoly[i][:,end]
+            if close_poly
+                mpoly[i] = hcat(mpoly[i], mpoly[i][:,1])
+            else
+                error("All input polys need to be closed.")
+            end
+        end
+    end
     # total size is sum of sizes plus one extra point for all but the
     # first poly.
     totsize = mapreduce(x->size(x,2), +, mpoly) + length(mpoly) -1
@@ -726,7 +758,6 @@ function concat_poly(mpoly::Vector)
     is = 1
     for i=1:length(mpoly)
         push!(splits, is)
-        @assert mpoly[i][:,1]==mpoly[i][:,end] "All input polys need to be closed."
         bigpoly[:,is:is+size(mpoly[i],2)-1] = mpoly[i]
         if i==1
             is = is+size(mpoly[i],2)
@@ -746,7 +777,7 @@ function find_poly_splits(bigpoly::Matrix)
     p1 = bigpoly[:,1]
     for i=1:size(bigpoly,2)
         if p1==bigpoly[:,i]
-            push!(splits,i)
+            push!(splits,i+1)
         end
     end
     splits
@@ -884,8 +915,8 @@ end
 
 Transform between projections.  Uses Proj4.jl.  Example:
 
-    longlat = "+proj=longlat"
-    utm56 = "+proj=utm +zone=56 +south"
+    longlat = "+proj=longlat +datum=WGS84"
+    utm56 = "+proj=utm +zone=56 +south +datum=WGS84"
     transform_proj([6e3,197e3], utm56, longlat)
 
 Input:
