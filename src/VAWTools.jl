@@ -126,6 +126,23 @@ function _downsample_boxcar(v,rx,ry,window,averagemask)
     return vnew
 end
 
+import Interpolations
+"""
+    upsample(g::Gridded, x, y)
+
+Upsample to match x, y.
+"""
+function upsample(g::Gridded, x, y)
+    gi  = Interpolations.interpolate((g.x, g.y), g.v, Interpolations.Gridded(Interpolations.Linear()) )
+    if haserror(g)
+        gie  = Interpolations.interpolate((g.x, g.y), g.err, Interpolations.Gridded(Interpolations.Linear()) )
+        return Gridded(x, y, [gi[xx,yy] for xx=x, yy=y],
+                [gie[xx,yy] for xx=x, yy=y])
+    else
+        return Gridded(x, y, [gi[xx,yy] for xx=x, yy=y])
+    end
+end
+
 function (+)(g1::Gridded, g2::Gridded)
     @assert g1.midpoint==g2.midpoint
     @assert g1.proj==g2.proj
@@ -552,8 +569,8 @@ function write_agr{T_}(g::AGR{T_}, fn::AbstractString; NA=nothing, T=T_)
     if !isbin_file(fn)
         ext = splitext(fn)[2]
         if ext==".grid" || ext==".asc"
-            println("Changing extension to .agr")
-            ext = ".agr"
+            # println("Changing extension to .agr")
+            # ext = ".agr"
         elseif ext!=".agr"
             error("unsupported extension")
         end
