@@ -29,6 +29,7 @@ Returns:
 """
 function make_1Dglacier(dem::Gridded, binsize_or_bins, glaciermask=trues(size(dem.v));
                         binround=_binround(binsize_or_bins),
+                        min_bin_number_ends=0,
                         window_dem_smooth=0.0,
                         window_width_smooth=0.0,
                         alpha_min=deg2rad(0.4),
@@ -53,7 +54,8 @@ function make_1Dglacier(dem::Gridded, binsize_or_bins, glaciermask=trues(size(de
     ret_nans = false
     alpha2d = absslope(dem, glaciermask, ret_nans)
 
-    bands, bandi = bin_grid(dem, binsize_or_bins, glaciermask, binround=binround)
+    bands, bandi = bin_grid(dem, binsize_or_bins, glaciermask,
+                                             binround=binround, min_bin_number_ends=min_bin_number_ends)
 
     nb = length(bands)
     cellsz = step(dem.x)^2
@@ -110,9 +112,9 @@ function make_1Dglacier(dem::Gridded, binsize_or_bins, glaciermask=trues(size(de
     xmid = x[1:end-1] + diff(x)/2
 
     # tests
-    if abs(totalarea-sum(areas))>1.0
-        error("Something's amiss, sum of area of bands $(sum(areas)) not equal total area $totalarea,")
-    end
+    # if abs(totalarea-sum(areas))>1.0
+    #     error("Something's amiss, sum of area of bands $(sum(areas)) not equal total area $totalarea,")
+    # end
     # check band length against diagonal
     tmp = sum(glaciermask,2)
     xextent = (findlast(tmp.>0)-findfirst(tmp.>0))*dx
@@ -187,15 +189,19 @@ Bins a gird into bands.  Often used to bin a DEM into elevation bands.
 
 KW:
 - binround -- floor the bin-start using this many digits (see help of floor)
+- min_bin_number_ends -- minimum number of elements in the uppermost and lowermost
+                         band.  If below, merge those cells into the first viable band.
 
 Return:
 - bands -- a range of the bands, e.g. 0.0:10.0:100.0
 - bandi -- a Vector{Vector{Int}} of length(bands) with each element
            containing the indices of cells in the band
 """
-bin_grid(g::Gridded, binsize_or_bins, mask=BitArray([]); binround=_binround(binsize_or_bins)) =
-    bin_grid(g.v, binsize_or_bins, mask; binround=binround)
-function bin_grid(v::Matrix, binsize_or_bins, mask=BitArray([]); binround=_binround(binsize_or_bins))
+bin_grid(g::Gridded, binsize_or_bins, mask=BitArray([]);
+         binround=_binround(binsize_or_bins), min_bin_number_ends=0) =
+    bin_grid(g.v, binsize_or_bins, mask; binround=binround, min_bin_number_ends=min_bin_number_ends)
+function bin_grid(v::Matrix, binsize_or_bins, mask=BitArray([]);
+    binround=_binround(binsize_or_bins), min_bin_number_ends=0)
     if isempty(mask)
         v = v
         ginds = 1:length(v)
@@ -219,9 +225,9 @@ function bin_grid(v::Matrix, binsize_or_bins, mask=BitArray([]); binround=_binro
     else
         bins = binsize_or_bins
     end
-    _bin_grid_kernel(bins, nv, v, ginds)
+    return _bin_grid_kernel(bins, nv, v, ginds, min_bin_number_ends)
 end
-@inbounds function _bin_grid_kernel(bins, nv, v, ginds)
+@inbounds function _bin_grid_kernel(bins, nv, v, ginds, min_bin_number_ends)
     # initialize output
     indices = Vector{Int}[]
     for b in bins
@@ -239,7 +245,27 @@ end
         end
         push!(indices[i], ginds[j])
     end
-    return bins, indices
+    # remove top and bottom bins if too small
+    inds2pop = [1,length(indices)]
+    num = [0,0]
+    for i = 1:length(indices)
+        if length(indices[i])+num[1]>=min_bin_number_ends
+            inds2pop[1] = i
+            break
+        end
+        num[1] +=length(indices[i])
+    end
+    for i = length(indices):-1:1
+        if length(indices[i])+num[2]>=min_bin_number_ends
+            inds2pop[2] = i
+            break
+        end
+        num[2] +=length(indices[i])
+    end
+    # add the dropped cells to the next/previous band
+    append!(indices[inds2pop[1]], vcat(indices[1:inds2pop[1]-1]...))
+    append!(indices[inds2pop[2]], vcat(indices[inds2pop[2]+1:end]...))
+    return bins[inds2pop[1]:inds2pop[2]], indices[inds2pop[1]:inds2pop[2]]
 end
 
 
@@ -275,7 +301,7 @@ function bin_traj(tr::Traj, g::Gridded, binsize_or_bins, mask=trues(size(g.v)); 
     else
         bins = binsize_or_bins
     end
-    _bin_grid_kernel(bins, nv, v, ginds)
+    _bin_grid_kernel(bins, nv, v, ginds, 0)
 end
 
 """
@@ -355,12 +381,12 @@ end
 
 
 """
-    bandi_for_other_grid(bands, bandi, binmat, g::Gridded,
+    bandi_for_other_grid(bands, bandi, g::Gridded,
                          othergrid::Gridded, othermask=trues(size(othergrid.v))
     bandi_for_other_grid(bands, bandi, g::Gridded,
                          othergrid::Gridded, othermask=trues(size(othergrid.v)))
 
-Returns vector of indices (bandi) to map a different grid onto the
+Returns vector of indices (bandi) to map a different grid (othergird) onto the
 bands encoded in `binmat` (or `bands, bandi`) and grid `g`.  It only
 maps points onto bands which are within the mask applied to generate
 the bands.  Additionally & optionally, a mask for the othergrid can
@@ -905,5 +931,5 @@ function plot_bands(dem, bands, bandi; bands2plot=1:length(bands))
             binmat[i] = NaN
         end
     end
-    Main.contourf(dem.x,dem.y,binmat',aspect_ratio=:equal)
+    Main.PyPlot.contourf(dem.x,dem.y,binmat',aspect_ratio=:equal)
 end
