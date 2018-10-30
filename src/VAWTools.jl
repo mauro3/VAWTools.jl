@@ -1340,6 +1340,19 @@ function meannan(a)
     cum/n # == NaN if n==0
 end
 
+
+"Extrema ignoring NaNs"
+function extremanan(a)
+    mi,ma = zero(eltype(a)),zero(eltype(a))
+    @inbounds for i in eachindex(a)
+        if !isnan(a[i])
+            mi = min(mi, a[i])
+            ma = max(ma, a[i])
+        end
+    end
+    (mi,ma)
+end
+
 "Std ignoring NaNs"
 function stdnan(a)
     n = 0
