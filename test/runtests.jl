@@ -701,7 +701,7 @@ window_frac = 0.4
 plotyes=false
 x=nothing
 y=nothing
-ubar_, ubar, facs, mask_ubar_ = VAWTools._calc_u(q1d, boundaries, u_trial, thick,
+ubar, mask_ubar, facs = VAWTools._calc_u(q1d, boundaries, u_trial, thick,
                                                 ux, uy, dx, mask, bands,
                                                 flux_dir_window, # in [m]
                                                 plotyes,x,y)
@@ -713,4 +713,4 @@ u2d, u2d_at_bands, scaling_factors_1d, mask_u2d_at_bands = VAWTools.calc_u(q1d, 
                                                                            window_frac)
 
 # more tests would be good...
-@test isequal(u2d_at_bands,ubar)
+@test isequal(u2d_at_bands, ubar)

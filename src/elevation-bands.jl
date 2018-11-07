@@ -773,62 +773,77 @@ function calc_fluxdir(l::Line, ux, uy, window, dx, bands)
 end
 
 """
-    calc_u(q1d, boundaries, thick, alpha, ux, uy, dx, mask, bands, lengths,
-           flux_dir_window, window_frac=1.5,
-           x=nothing, y=nothing) # these are only needed for plotting
-    -> u2d, u2d_at_bands, scaling_factors_1d, mask_u2d_at_bands
+    calc_u(q1d, boundaries, u_trial, thick,
+                ux, uy, dx, mask, bands, lengths,
+                flux_dir_window, # in [m]
+                boxcarM::AbstractMatrix or window_frac;
+                plotyes=false,
+                x=nothing, y=nothing)
 
 Calculates a 2D field of depth averaged ice flow speed `ubar` which has the
 same flux across elevation band boundaries as the supplied 1D flux
 `q1d`.  Only `q1d` is a flow-band variable.  The flux across elevation
 bands is calculated with `calc_fluxdir`.
 
-Note:
+Input:
+- q1d: 1d flux (m/a) on elevation bands
+- boundaries: from calc_boundaries
+- u_trial: velocity
+- thick: ice thickness
+- ux,uy: velocity direction (calculated as fall-line of surface DEM)
+- dx: grid size
+- mask: true where glacier is
+- lengths: length of each elevation band
+- flux_dir_window: as used in calc_fluxdir
+- boxcarM or window_frac:
+  - pre-calculated boxcar operator
+  - window_frac: window over which to smooth as fraction of the maximum(length)
 
+Output:
+- ubar2d: the smoothed IV
+- ubar: the IV at the elevation-band boundaries
+- mask_ubar: true where ubar contains a value
+- facs: scaling factor in 1D
+
+Note:
 - An assumption about the distribution of the u is needed, which will
   be scaled to conform to mass conservation.  At the moment a function
   `thick[i,j].^u_exp` is used.
-
-TODO:
-- pre-calculate the boxcar filter
 """
 function calc_u(q1d, boundaries, u_trial, thick,
                 ux, uy, dx, mask, bands, lengths,
                 flux_dir_window, # in [m]
-                boxcarM::AbstractMatrix;
+                filter;
                 plotyes=false,
                 x=nothing, y=nothing)
-    ubar_, ubar, facs, mask_ubar = _calc_u(q1d, boundaries, u_trial, thick,
-                                    ux, uy, dx, mask, bands,
-                                    flux_dir_window, # in [m]
-                                           plotyes,x,y)
-    # below type assertion is needed for type-stability ?!
-    return VAWTools.apply_boxcar_matrix(boxcarM, ubar_)::Array{eltype(q1d),2}, ubar, facs, mask_ubar
+    ubar, mask_ubar, facs = _calc_u(q1d, boundaries, u_trial, thick,
+                                           ux, uy, dx, mask, bands,
+                                           flux_dir_window, # in [m]
+                                           plotyes, x, y)
+    ubar_ = copy(ubar)
+    ubar_[isnan.(ubar_)] = 0  # remove NaNs to allow filtering
+
+    # type assertion is needed for type-stability
+    out::Array{eltype(q1d),2} = if filter isa AbstractMatrix
+        VAWTools.apply_boxcar_matrix(filter, ubar_)
+    else
+        boxcar(ubar_, Int((filter*maximum(lengths))÷dx)+1, mask_ubar, (!).(mask) )
+    end
+
+    return out, ubar, mask_ubar, facs
 end
-function calc_u(q1d, boundaries, u_trial, thick,
-                ux, uy, dx, mask, bands, lengths,
-                flux_dir_window, # in [m]
-                window_frac;
-                plotyes=false,
-                x=nothing, y=nothing)
-    ubar_, ubar, facs, mask_ubar_ = _calc_u(q1d, boundaries, u_trial, thick,
-                                    ux, uy, dx, mask, bands,
-                                    flux_dir_window, # in [m]
-                                    plotyes,x,y)
-    return boxcar(ubar_, Int((window_frac*maximum(lengths))÷dx)+1, mask_ubar_, (!).(mask) ), ubar, facs, mask_ubar_
-end
-# this helper function is needed for type stability
+# this helper function is needed for type stability.
 function _calc_u(q1d, boundaries, u_trial, thick,
-                ux, uy, dx, mask, bands,
-                flux_dir_window,
-                plotyes,
-                x, y) # these are only needed for plotting
+                 ux, uy, dx, mask, bands,
+                 flux_dir_window,
+                 plotyes,
+                 x, y) # these are only needed for plotting
     #plotyes && figure()
     dims = size(mask)
 
-    # this calculates the u at all elevation band boundaries:
+    # calculate the u at all elevation band boundaries:
     ubar = zeros(dims)*NaN
-    facs = Float64[]
+    facs = Float64[] # scaling factor in 1D
     for (ib,bnd) in enumerate(boundaries)
         if ib<length(bands)
             # Find the receiving band, can be a number further than 1.
@@ -843,7 +858,7 @@ function _calc_u(q1d, boundaries, u_trial, thick,
             bb=bnd[ibb]
         else # outflow at terminus
             # TODO: this probably needs updating where several elevation bands contribute (tide-water)
-            # -> no, only ever the last band does outflow
+            # -> no, only ever the last band does outflow in our 1D model
             bb = get(bnd, -1, bnd[0]) # if sea-terminating use those edges.
         end
         # loop over segments
@@ -876,15 +891,13 @@ function _calc_u(q1d, boundaries, u_trial, thick,
             ubar[i,j] = u[n]
         end
     end
-    mask_ubar_ = mask .& ((!).(isnan.(ubar))) # location of all cells for which `ubar` was calculated
-    ubar_ = copy(ubar)
-    ubar_[isnan.(ubar_)] = 0
+    mask_ubar = mask .& ((!).(isnan.(ubar))) # location of all cells for which `ubar` was calculated
     # if plotyes
     #     # imshow(binmat',origin="lower", extent=(x[1],x[end],y[1],y[end]), cmap="flag"); colorbar();
     #     imshow(ubar',origin="lower", extent=(x[1],x[end],y[1],y[end]),); colorbar(); clim(0,50)
     # end
 
-    return ubar_, ubar, facs, mask_ubar_
+    return ubar, mask_ubar, facs
 end
 
 """
@@ -902,13 +915,13 @@ function get_iv_boxcar_M(F, dem, mask, bands, bandi, lengths, iv_window_frac)
     thick = u_trial
     dx = step(dem.x)
     flux_dir_window = 2
-    ubar_, ubar, facs, mask_ubar_ = _calc_u(q1d, boundaries, u_trial, thick,
-                                            ux, uy, dx, mask,
-                                            bands,
-                                            flux_dir_window,
-                                            false,nothing,nothing)
+    mask_ubar = _calc_u(q1d, boundaries, u_trial, thick,
+                         ux, uy, dx, mask,
+                         bands,
+                         flux_dir_window,
+                         false,nothing,nothing)[2]
 
-    return boxcar_matrix(F, Int((iv_window_frac*maximum(lengths))÷dx)+1, mask_ubar_, (!).(mask)),
+    return boxcar_matrix(F, Int((iv_window_frac*maximum(lengths))÷dx)+1, mask_ubar, (!).(mask)),
            boundaries, ux, uy
 end
 
