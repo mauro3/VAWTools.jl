@@ -1128,11 +1128,12 @@ In:
 Out:
 - slope angle (rad)
 
-Note: slope and angle are very similar up to about ~0.4 or 20deg
+Note:
+- slope and angle are very similar up to about ~0.4 or 20deg
 """
-absslope(g::Gridded,weights::AbstractMatrix=UniformArray{Bool,2}(true),retnan=true) =
+absslope(g::Gridded, weights::AbstractMatrix=UniformArray{Bool,2}(true), retnan=true) =
     absslope(g.x,g.y,g.v,weights,retnan)
-function absslope(x::Range,y::Range,v,weights::AbstractMatrix=UniformArray{Bool,2}(true),retnan=true)
+function absslope(x::Range, y::Range, v, weights::AbstractMatrix=UniformArray{Bool,2}(true), retnan=true)
     dvx,dvy = gradient3by3(x,y,v,weights,retnan)
     for i in eachindex(dvx)
         dvx[i] = atan(sqrt(dvx[i]^2+dvy[i]^2))
@@ -1203,6 +1204,9 @@ Out:
 - dvx,dvy
 
 Reference: gradient3by3_fast
+
+Notes:
+- maybe this should be done using one of the Images.jl filters instead
 """
 gradient3by3(g::Gridded,weights::AbstractMatrix=UniformArray{Bool,2}(true),retnan=true) =
     gradient3by3(g.x,g.y,g.v,weights,retnan)
