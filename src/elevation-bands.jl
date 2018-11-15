@@ -41,10 +41,10 @@ function make_1Dglacier(dem::Gridded, binsize_or_bins, glaciermask=trues(size(de
     # on Uaar.  However, it can also be bad.  YMMV, check!
     if window_dem_smooth>0
         dem = deepcopy(dem)
-        fillmask = dem.v.!=FILL
-        mask = fillmask .& glaciermask
+        nofillmask = dem.v.!=FILL
+        mask = nofillmask .& glaciermask
         dem.v[:] = boxcar(dem.v, round(Int,window_dem_smooth/dx), mask, (!).(mask))
-        dem.v[(!).(fillmask)] = FILL
+        dem.v[(!).(nofillmask)] = FILL
     end
     # no FILL inside glaciermask
     @assert !any(dem.v[glaciermask].==FILL)

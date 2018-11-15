@@ -1404,9 +1404,9 @@ function mean_weighted(a,w)
 end
 
 """
-    boxcar(A::AbstractArray, window, [, weights, dropmask])
-    boxcar(A::AbstractArray, windows::Tuple, [, weights, dropmask])
-    boxcar(A::AbstractArray, window::AbstractArray, [, weights, dropmask])
+    boxcar(A::AbstractArray, window, [, weights, keepmask])
+    boxcar(A::AbstractArray, windows::Tuple, [, weights, keepmask])
+    boxcar(A::AbstractArray, window::AbstractArray, [, weights, keepmask])
 
 Boxcar filter.  The two argument call skips NaNs.  The three & four
 argument call uses weights and propagates NaNs, it can be a lot faster.
@@ -1416,17 +1416,18 @@ The window can be specified as:
 - integer, for a symmetric window in all dimensions
 - a tuple to give lower and upper windows
 - a tuple of tuples to give different lower and upper windows for all dimensions
+- a array of size(A) for a different, symmetric window at each point.
 
-If desired, a different window can be specified for each point.  Then
-pass an array of same size as A as window.
+Weights, if given, will use those relative weights for averaging.  Note that
+points which have value==NaN and weight==0 will not poison the result.
 
-For the weights it may be faster to use non-Bool arrays nor BitArrays,
-say Int8.  Note that NaNs where weight==0 will not poison the result.
+No average is calculated for points where keepmask==true, instead
+their original value will be kept.
 
-No average is calculated for points where dropmask==true, instead
-their original value will be used.
-
-Also works for Vectors.
+Notes:
+- For the weights it may be faster to use non-Bool arrays nor BitArrays,
+  say Int8.  Note that NaNs where weight==0 will not poison the result.
+- Also works for Vectors.
 
 From http://julialang.org/blog/2016/02/iteration
 """
@@ -1511,36 +1512,11 @@ function boxcar(A::AbstractArray, windows::Tuple{<:AbstractArray, <:AbstractArra
     out
 end
 
-# # this drops points which themselves have zero weight.
-# #function boxcar{T1,T2,T3,N}(A::AbstractArray{T1,N}, window::AbstractArray{T2,N}, weights::AbstractArray{T3,N}=UniformArray{T,N}(1))
-# function boxcar(A::AbstractArray, window, weights::AbstractArray)
-#     @assert size(weights)==size(A)
-#     out = zeros(A)
-#     # make an accumulator type closed under addition (needed for Bools):
-#     T = typeof(one(eltype(weights)) + one(eltype(weights)))
-#     R = CartesianRange(size(A))
-#     I1, Iend = first(R), last(R)
-#     @inbounds @fastmath for I in R
-#         if weights[I]==0
-#             out[I] = 0
-#             continue
-#         end
-#         n, s = zero(T), zero(eltype(out))
-#         for J in CartesianRange(max(I1, I-I1*window), min(Iend, I+I1*window))
-#             s += A[J]*weights[J]
-#             n += weights[J]
-#         end
-#         out[I] = s/n
-#     end
-#     out
-# end
-
-# this does not drop points which themselves have zero weight, only points on dropmask.
-boxcar(A::AbstractArray, window, weights::AbstractArray, dropmask::AbstractArray=(weights.==0)) =
-    boxcar(A, (window,window), weights, dropmask)
+boxcar(A::AbstractArray, window, weights::AbstractArray, keepmask::AbstractArray=(weights.==0)) =
+    boxcar(A, (window,window), weights, keepmask)
 function boxcar{T,N}(A::AbstractArray{T,N}, windows::Tuple,
                      weights::AbstractArray,
-                     dropmask::AbstractArray=(weights.==0))
+                     keepmask::AbstractArray=(weights.==0))
     @assert size(weights)==size(A)
     window_lower, window_upper = windows
     out = zeros(A)
@@ -1551,16 +1527,16 @@ function boxcar{T,N}(A::AbstractArray{T,N}, windows::Tuple,
     I_l = CartesianIndex(I1.I.*window_lower)
     I_u = CartesianIndex(I1.I.*window_upper)
     @inbounds for I in R
-        if dropmask[I]
+        if keepmask[I]
             out[I] = A[I]
         else
             n, s = zero(AT), zero(T)
             for J in CartesianRange(max(I1, I-I_l), min(Iend, I+I_u))
                 AJ, w = A[J], weights[J]
-                # if !isnan(AJ)
-                s += AJ * convert(T, w)
-                n += w
-                # end
+                if w!=0
+                    s += AJ * convert(T, w)
+                    n += w
+                end
             end
             if n==0
                 #error("At location $I no contributing cells found")
@@ -1575,15 +1551,14 @@ end
 
 
 """
-    boxcar_matrix(T::DataType, window::Integer, weights::AbstractMatrix[, dropmask])
+    boxcar_matrix(T::DataType, window::Integer, weights::AbstractMatrix[, keepmask])
 
 This produces a sparse matrix which can be used to apply the filter:
 `bx*hs2d`. Relatively expensive to create but very fast to apply, thus
 use when needing the same filter several times.
 
 Notes:
-- here NaNs where weight==0 do not poison the result.
-- therefore applying the matrix may not be 100% identical to just doing boxcar(...)
+- NaNs where weight==0 do not poison the result.
 
 Apply with
 
@@ -1591,8 +1566,8 @@ Apply with
 """
 function boxcar_matrix{T,TT,N}(::Type{T}, window::Integer,
                                weights::AbstractArray{TT,N},
-                               dropmask::AbstractArray=(weights.==0))
-                               # dropmask::AbstractArray=BitArray{N}(ntuple(x->0, Val{N})...))
+                               keepmask::AbstractArray=(weights.==0))
+                               # keepmask::AbstractArray=BitArray{N}(ntuple(x->0, Val{N})...))
     # make an accumulator type closed under addition (needed for Ints and Bools):
     Tacc = promote_type(T, eltype(weights))
     nr = size(weights,1)
@@ -1607,7 +1582,7 @@ function boxcar_matrix{T,TT,N}(::Type{T}, window::Integer,
     I1, Iend = first(R), last(R)
     @inbounds @fastmath for I in R
         i = (I.I[2]-1)*nr + I.I[1] # row of output matrix
-        if dropmask[I]
+        if keepmask[I]
             # do not average at this location, preserve original value
             push!(is, i)
             push!(js, i)

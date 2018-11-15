@@ -498,6 +498,7 @@ end
 
 # with NaN poisoning
 orig[1,1] = NaN
+weightsbb[1,1] = 1
 filt1 = VAWTools.boxcar(orig, window, weightsbb, dropmask)
 M = VAWTools.boxcar_matrix(T, window, weightsbb, dropmask)
 @test size(M,1)==size(M,2)
@@ -507,13 +508,13 @@ filt2 = VAWTools.apply_boxcar_matrix(M, orig)
 @test eltype(orig)==eltype(filt2)
 for i=eachindex(orig)
     if isnan(filt1[i])
-        isequal(filt1[i], filt2[i])
+        @test isequal(filt1[i], filt2[i])
     else
         @test filt1[i] ≈ filt2[i]
     end
 end
 
-# when NaN is masked then the M-filter is different:
+# NaN is masked: no poisoning
 orig[1,1] = NaN
 weightsbb[1,1] = 0
 filt1 = VAWTools.boxcar(orig, window, weightsbb, dropmask)
@@ -523,12 +524,11 @@ M = VAWTools.boxcar_matrix(T, window, weightsbb, dropmask)
 filt2 = VAWTools.apply_boxcar_matrix(M, orig)
 @test eltype(orig)==eltype(filt1)
 @test eltype(orig)==eltype(filt2)
-for j=1:nc,i=1:nr
-    if i<5 && j<5
-        @test isnan(filt1[i,j])
-        @test !isnan(filt2[i,j])
+for i=eachindex(orig)
+    if isnan(filt1[i])
+        @test isequal(filt1[i], filt2[i])
     else
-        @test filt1[i,j] ≈ filt2[i,j]
+        @test filt1[i] ≈ filt2[i]
     end
 end
 
