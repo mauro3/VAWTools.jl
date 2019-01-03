@@ -10,8 +10,10 @@ These are various tools to process data encountered at VAW/ETHZ.
 
 To install run at the Julia REPL:
 ```
+julia> Pkg.clone("git@github.com:yeesian/ArchGDAL.jl.git") # this will throw an error but still succeed
 julia> Pkg.clone("git@github.com:mauro3/VAWTools.jl.git")
 ```
+then also checkout the version `v0.0.0` for ArchGDAL manually.
 
 TODO:
 - [ ] provide documentation

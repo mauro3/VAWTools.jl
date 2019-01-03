@@ -14,8 +14,8 @@ notifications:
 # uncomment the following lines to override the default test script
 script:
  - if [[ -a .git/shallow ]]; then git fetch --unshallow; fi
- - julia -e 'Pkg.clone(pwd()); Pkg.build("VAWTools"); Pkg.test("VAWTools"; coverage=true)'
- # - julia -e 'Pkg.clone("https://github.com/wkearn/RasterIO.jl.git"); Pkg.build("RasterIO"); Pkg.clone(pwd()); Pkg.build("VAWTools"); Pkg.test("VAWTools"; coverage=true)'
+ - julia -e 'try Pkg.clone("https://github.com/yeesian/ArchGDAL.jl.git") end; LibGit2.branch!(LibGit2.GitRepo(Pkg.Dir.path()*"/ArchGDAL/"), "julia-0.6-branch", "bbe15b66cde73bb07f4e35909e78e2c92d8d374b"); Pkg.update(); Pkg.build("ArchGDAL"); Pkg.clone(pwd()); Pkg.build("VAWTools"); Pkg.test("VAWTools"; coverage=true)'
+# - julia -e 'Pkg.clone(pwd()); Pkg.build("VAWTools"); Pkg.test("VAWTools"; coverage=true)'
 after_success:
   # push coverage results to Coveralls
   - julia -e 'cd(Pkg.dir("VAWTools")); Pkg.add("Coverage"); using Coverage; Coveralls.submit(Coveralls.process_folder())'
