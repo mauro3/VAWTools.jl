@@ -1,10 +1,8 @@
-__precompile__() # RasterIO is not pre-compiled
+__precompile__()
 
 module VAWTools
 using Compat
 using Parameters
-
-include("other-pks-fixes.jl")
 
 # General tools, maybe applicable more widely.
 export read_agr, write_agr, read_xyn, inpoly, AGridded, Gridded, Gridded1d, Traj,
@@ -275,9 +273,9 @@ immutable AGR{T} # Ascii GRid
     v::Matrix{T}    # values: orientation is awkward, as in the AGR file, see https://en.wikipedia.org/wiki/Esri_grid
     nc::Int64       # NCOLS TODO: remove those
     nr::Int64       # NROWS
-    xll::T          # XLLCORNER
-    yll::T          # YLLCORNER
-    dx::T           # CELLSIZE
+    xll::Float64    # XLLCORNER
+    yll::Float64    # YLLCORNER
+    dx::Float64     # CELLSIZE
     NA::T           # NODATA
     hasutm::Bool    # Matthias sometimes abuses the NODATA_value field as UTM-zone field
     extra_header::Vector{Float32} # the .bin files have space for
@@ -457,9 +455,9 @@ function _read_agr(io::IO, T=Float32)
     # read header
     nc = toT(io, Int)
     nr = toT(io, Int)
-    xll = toT(io,T)
-    yll = toT(io,T)
-    dx = toT(io,T)
+    xll = toT(io,Float64)
+    yll = toT(io,Float64)
+    dx = toT(io,Float64)
     # Matthias sometimes abuses the NODATA_value field as UTM-zone field
     # in non-binary grids:
     if isbin_file(io)
@@ -823,6 +821,47 @@ function split_poly{T}(bigpoly::Matrix{T}, splits)
 end
 
 import Proj4
+
+import ArchGDAL
+"""
+    read_geotiff(fn::AbstractString, T=Float32; bandnr=1, NA=convert(T,NaN))
+
+Reads a geotiff raster and put output
+into a Gridded instance (including the Proj4 projection string).
+
+Link: https://github.com/yeesian/ArchGDAL.jl/issues/68
+"""
+function read_geotiff(filepath::AbstractString, T=Float32; bandnr=1, NA=convert(T,NaN))
+    AG = ArchGDAL
+    out = AG.registerdrivers() do
+        AG.read(filepath) do dataset
+            band = AG.getband(dataset, bandnr)
+            w, h = AG.width(band), AG.height(band)
+            # scale, off = AG.getscale(band), AG.getoffset(band)
+            na = AG.getnodatavalue(band)
+            mat = convert(Matrix{T}, AG.read(band))
+            gt = AG.getgeotransform(dataset)
+            dx, dy = gt[2], -gt[end]
+            x0 = gt[1] + dx/2
+            x1 = x0 + (w-1) * dx
+            y1 = gt[4] - dy/2
+            y0 = y1 - (h-1)*dy
+
+            proj4 = strip(AG.toPROJ4(AG.importWKT(AG.getproj(dataset))))
+            Gridded(x0:dx:x1, y0:dy:y1, mat[:,end:-1:1], Matrix{T}(0,0), true, proj4)
+        end
+    end
+end
+
+"""
+
+There are some tricks to make sparse geotiffs small but the right NA
+values need to be used for compression to work well.
+"""
+function write_geotiff()
+
+end
+
 # # Make RasterIO conditional as it is not Julia 0.6 compatible
 # if haskey(Pkg.installed(), "RasterIO")
 #     println("Enabling RasterIO function read_rasterio")

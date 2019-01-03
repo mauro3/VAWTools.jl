@@ -135,12 +135,14 @@ g1 = VAWTools._read_agr("testfiles/wiki.agr")
 gg = Gridded(g1)
 @test isequal(VAWTools.AGR(gg, NA_agr=-9999).v, g1.v)
 
-# # RasterIO geotiff
-# gt,proj4 = VAWTools.read_rasterio("testfiles/small_world.tif")
-# @test proj4=="+proj=longlat +datum=WGS84 +no_defs" || proj4==""
-# @test gt.x==-179.55:0.9:179.55
-# @test gt.y==-89.55:0.9:89.55
-# @test isa(gt.v, Array{Float32,2})
+# geotiff
+gt = VAWTools.read_geotiff("testfiles/small_world.tif")
+gt_ag = VAWTools.read_geotiff("testfiles/small_world.asc")
+@test gt.proj=="+proj=longlat +datum=WGS84 +no_defs"
+@test gt.x==gt_ag.x
+@test gt.y==gt_ag.y
+@test isa(gt.v, Array{Float32,2})
+@test gt.v==gt_ag.v
 
 # Trajectory
 @test_throws AssertionError Traj(1:5, 6:11, [0.0:5.0;])
