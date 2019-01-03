@@ -72,9 +72,14 @@ the window is chosen such that there is no overlap (for odd `step`) or
 one cell overlap (for even `step`).
 
 """
-function downsample(g::Gridded, step, start=1, average=true, averagemask=UniformArray{Bool,2}(true))
-    rx = start:step:size(g.v,1)
-    ry = start:step:size(g.v,2)
+function downsample(g::Gridded, step, start=1, average=true, averagemask=UniformArray{Bool,2}(true); stop=size(g.v))
+    if start isa Number
+        rx = start:step:stop[1]
+        ry = start:step:stop[2]
+    else
+        rx = start[1]:step:stop[1]
+        ry = start[2]:step:stop[2]
+    end
     nx,ny = length(rx),length(ry)
     @assert nx>1
     @assert ny>1
@@ -189,6 +194,8 @@ Fields:
 - proj::String a string interpretable by Proj4
 
 There are constructors to leave off v, err, splits and proj.
+
+TODO: having the `splits` is probably worse than just using a list of trajectories.
 """
 @with_kw mutable struct Traj{T}
     x::Vector{Float64}
