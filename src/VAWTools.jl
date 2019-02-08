@@ -840,6 +840,7 @@ function read_geotiff(filepath::AbstractString, T=Float32; bandnr=1, NA=convert(
             # scale, off = AG.getscale(band), AG.getoffset(band)
             na = AG.getnodatavalue(band)
             mat = convert(Matrix{T}, AG.read(band))
+            mat[mat.==na] = NA
             gt = AG.getgeotransform(dataset)
             dx, dy = gt[2], -gt[end]
             x0 = gt[1] + dx/2
