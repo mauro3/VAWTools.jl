@@ -598,11 +598,25 @@ bands, bandi = bin_grid(g, 10.0, mask)
 binmat = VAWTools.bins2matrix(g, bands, bandi)
 @test all(binmat[1:10,:].==0)
 @test all(binmat[:,1].==0)
+# adjusting step
+bands, bandi = bin_grid(g, 200.0, mask)
+@test length(bands)==length(bandi)
+@show step(bands)
+binmat = VAWTools.bins2matrix(g, bands, bandi)
+@test all(binmat[1:10,:].==0)
+@test all(binmat[:,1].==0)
+# range steps:
+bands_, bandi_ = bin_grid(g, bands, mask)
+@test all(bands_.==bands)
+@test all(bandi_.==bandi)
 # non range steps:
 bands_, bandi_ = bin_grid(g, collect(bands), mask)
 @test all(bands_.==bands)
 @test all(bandi_.==bandi)
 
+
+bands, bandi = bin_grid(g, 10.0, mask)
+binmat = VAWTools.bins2matrix(g, bands, bandi)
 xx,yy = -50:11:23, 900.0:7:1200
 othergrid = Gridded(xx, yy, rand(length(xx),length(yy)))
 bandii = VAWTools.bandi_for_other_grid(bands, bandi, binmat, g, othergrid)

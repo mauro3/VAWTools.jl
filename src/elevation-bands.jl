@@ -6,6 +6,7 @@
 
 export map_onto_bands, make_1Dglacier, map_back_to_2D, map_back_to_2D!
 
+# used to round (up or down) the binsize to the next decimal place
 _binround(binsize::Number) = -floor(Int, log10(abs(binsize)))
 _binround(binsize) = 0
 
@@ -30,6 +31,7 @@ Returns:
 function make_1Dglacier(dem::Gridded, binsize_or_bins, glaciermask=trues(size(dem.v));
                         binround=_binround(binsize_or_bins),
                         min_bin_number_ends=0,
+                        min_bands=4,
                         window_dem_smooth=0.0,
                         window_width_smooth=0.0,
                         alpha_min=deg2rad(0.4),
@@ -55,7 +57,9 @@ function make_1Dglacier(dem::Gridded, binsize_or_bins, glaciermask=trues(size(de
     alpha2d = absslope(dem, glaciermask, ret_nans)
 
     bands, bandi = bin_grid(dem, binsize_or_bins, glaciermask,
-                                             binround=binround, min_bin_number_ends=min_bin_number_ends)
+                            binround=binround, min_bin_number_ends=min_bin_number_ends,
+                            min_bands=min_bands)
+    @assert length(bands)>=min_bands "Need at least three elevation bins"
 
     nb = length(bands)
     cellsz = step(dem.x)^2
@@ -191,6 +195,7 @@ KW:
 - binround -- floor the bin-start using this many digits (see help of floor)
 - min_bin_number_ends -- minimum number of elements in the uppermost and lowermost
                          band.  If below, merge those cells into the first viable band.
+- min_bands -- minimum number of bands produced (3).  Not integrated with min_bin_number_ends!
 
 Return:
 - bands -- a range of the bands, e.g. 0.0:10.0:100.0
@@ -198,10 +203,11 @@ Return:
            containing the indices of cells in the band
 """
 bin_grid(g::Gridded, binsize_or_bins, mask=BitArray([]);
-         binround=_binround(binsize_or_bins), min_bin_number_ends=0) =
-    bin_grid(g.v, binsize_or_bins, mask; binround=binround, min_bin_number_ends=min_bin_number_ends)
+         binround=_binround(binsize_or_bins), min_bin_number_ends=0, min_bands=4) =
+             bin_grid(g.v, binsize_or_bins, mask; binround=binround, min_bin_number_ends=min_bin_number_ends,
+                      min_bands=min_bands)
 function bin_grid(v::Matrix, binsize_or_bins, mask=BitArray([]);
-    binround=_binround(binsize_or_bins), min_bin_number_ends=0)
+                  binround=_binround(binsize_or_bins), min_bin_number_ends=0, min_bands=4)
     if isempty(mask)
         v = v
         ginds = 1:length(v)
@@ -211,19 +217,25 @@ function bin_grid(v::Matrix, binsize_or_bins, mask=BitArray([]);
         ginds = find(mask[:])
     end
     nv = length(v)
-    if isa(binsize_or_bins, Number) # i.e. a binsize
-        mi, ma = minimum(v), maximum(v)
-        if binsize_or_bins>=0
-            binstart = floor(mi, binround)
-            binend = floor(ma, binround) # better: `ceil(ma, binround) - binsize_or_bins` ?
+    bins = 1.0:-1
+    while length(bins)<min_bands
+        if isa(binsize_or_bins, Number) # i.e. a binsize
+            mi, ma = minimum(v), maximum(v)
+            if binsize_or_bins>=0
+                binstart = floor(mi, binround)
+                binend = floor(ma, binround) # better: `ceil(ma, binround) - binsize_or_bins` ?
+            else
+                binstart = ceil(ma, binround)
+                binend = ceil(mi, binround) # better: `ceil(ma, binround) - binsize_or_bins` ?
+            end
+            @assert !isnan(binstart) && !isnan(binend)
+            bins = binstart:binsize_or_bins:binend # these are the start of the bins
         else
-            binstart = ceil(ma, binround)
-            binend = ceil(mi, binround) # better: `ceil(ma, binround) - binsize_or_bins` ?
+            bins = binsize_or_bins
         end
-        @assert !isnan(binstart) && !isnan(binend)
-        bins = binstart:binsize_or_bins:binend # these are the start of the bins
-    else
-        bins = binsize_or_bins
+        if length(bins)<min_bands
+            binsize_or_bins = step(bins) - sign(step(bins))*5
+        end
     end
     return _bin_grid_kernel(bins, nv, v, ginds, min_bin_number_ends)
 end
@@ -246,20 +258,20 @@ end
         push!(indices[i], ginds[j])
     end
     # remove top and bottom bins if too small
-    inds2pop = [1,length(indices)]
+    inds2pop = [1,length(indices)] # remove up to and including these indices
     num = [0,0]
     for i = 1:length(indices)
         if length(indices[i])+num[1]>=min_bin_number_ends
-            inds2pop[1] = i
             break
         end
+        inds2pop[1] = i
         num[1] +=length(indices[i])
     end
     for i = length(indices):-1:1
         if length(indices[i])+num[2]>=min_bin_number_ends
-            inds2pop[2] = i
             break
         end
+        inds2pop[2] = i
         num[2] +=length(indices[i])
     end
     # add the dropped cells to the next/previous band
@@ -859,6 +871,8 @@ function _calc_u(q1d, boundaries, u_trial, thick,
         else # outflow at terminus
             # TODO: this probably needs updating where several elevation bands contribute (tide-water)
             # -> no, only ever the last band does outflow in our 1D model
+            #
+            # This errors at times, for example on RGI60-14.11814 (which is not sea-terminating)
             bb = get(bnd, -1, bnd[0]) # if sea-terminating use those edges.
         end
         # loop over segments
