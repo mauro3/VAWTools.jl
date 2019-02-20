@@ -696,7 +696,7 @@ function read_xyn(fn; hasz=false, fix=false)
     drop20 = false
     while i<=n
         if l[i]!=21
-            error("Malformed file: Expected 21 on line $i.")
+            error("Malformed file $fn: Expected 21 on line $i.")
         end
         # start a new polygon
         i += 1
@@ -726,7 +726,7 @@ function read_xyn(fn; hasz=false, fix=false)
             if fix
                 out[end] = hcat(out[end], out[end][:,1])
             else
-                error("Malformed file: polygon $is:$iend not closed")
+                error("Malformed file $fn: polygon $is:$iend not closed")
             end
         end
 

@@ -206,8 +206,8 @@ bin_grid(g::Gridded, binsize_or_bins, mask=BitArray([]);
          binround=_binround(binsize_or_bins), min_bin_number_ends=0, min_bands=4) =
              bin_grid(g.v, binsize_or_bins, mask; binround=binround, min_bin_number_ends=min_bin_number_ends,
                       min_bands=min_bands)
-function bin_grid(v::Matrix, binsize_or_bins, mask=BitArray([]);
-                  binround=_binround(binsize_or_bins), min_bin_number_ends=0, min_bands=4)
+function bin_grid(v::Matrix, binsize::Number, mask=BitArray([]);
+                  binround=_binround(binsize), min_bin_number_ends=0, min_bands=4)/
     if isempty(mask)
         v = v
         ginds = 1:length(v)
@@ -218,66 +218,76 @@ function bin_grid(v::Matrix, binsize_or_bins, mask=BitArray([]);
     end
     nv = length(v)
     bins = 1.0:-1
-    while length(bins)<min_bands
-        if isa(binsize_or_bins, Number) # i.e. a binsize
-            mi, ma = minimum(v), maximum(v)
-            if binsize_or_bins>=0
-                binstart = floor(mi, binround)
-                binend = floor(ma, binround) # better: `ceil(ma, binround) - binsize_or_bins` ?
-            else
-                binstart = ceil(ma, binround)
-                binend = ceil(mi, binround) # better: `ceil(ma, binround) - binsize_or_bins` ?
-            end
-            @assert !isnan(binstart) && !isnan(binend)
-            bins = binstart:binsize_or_bins:binend # these are the start of the bins
+    while length(bins)<=min_bands
+        mi, ma = minimum(v), maximum(v)
+        if binsize>=0
+            binstart = floor(mi, binround)
+            binend = floor(ma, binround) # better: `ceil(ma, binround) - binsize` ?
         else
-            bins = binsize_or_bins
+            binstart = ceil(ma, binround)
+            binend = ceil(mi, binround) # better: `ceil(ma, binround) - binsize` ?
         end
-        if length(bins)<min_bands
-            binsize_or_bins = step(bins) - sign(step(bins))*5
-        end
+        @assert !isnan(binstart) && !isnan(binend)
+        bins = binstart:binsize:binend # these are the start of the bins
+
+        # decreas binsize for next round
+        binsize = step(bins)/2
     end
     return _bin_grid_kernel(bins, nv, v, ginds, min_bin_number_ends)
 end
+function bin_grid(v::Matrix, bins::Range, mask=BitArray([]); min_bin_number_ends=0, kw...)
+    if isempty(mask)
+        v = v
+        ginds = 1:length(v)
+    else
+        @assert size(mask)==size(v)
+        v = v[mask]
+        ginds = find(mask[:])
+    end
+    nv = length(v)
+    _bin_grid_kernel(bins, nv, v, ginds, min_bin_number_ends)
+end
+
 @inbounds function _bin_grid_kernel(bins, nv, v, ginds, min_bin_number_ends)
     # initialize output
-    indices = Vector{Int}[]
+    bandi = Vector{Int}[]
     for b in bins
         ind = Int[]
-        push!(indices, ind)
+        push!(bandi, ind)
     end
     # fill it
     for j=1:nv
-        if (bins[2]-bins[1])>0
+        if step(bins)>0
             i = searchsortedlast(bins, v[j])
             i = i==0 ? 1 : i # if smaller then add to lowest bin
         else
             # https://github.com/JuliaLang/julia/issues/18653
             i = searchsortedlast(collect(bins), v[j], rev=true)
+            i = i==0 ? 1 : i # if smaller then add to highest bin (i.e. bins[1])
         end
-        push!(indices[i], ginds[j])
+        push!(bandi[i], ginds[j])
     end
-    # remove top and bottom bins if too small
-    inds2pop = [1,length(indices)] # remove up to and including these indices
+    # remove top and bottom bins if too few elements
+    inds2pop = [1,length(bandi)] # remove up to and including these bandi
     num = [0,0]
-    for i = 1:length(indices)
-        if length(indices[i])+num[1]>=min_bin_number_ends
-            break
-        end
+    for i = 1:length(bandi)
         inds2pop[1] = i
-        num[1] +=length(indices[i])
-    end
-    for i = length(indices):-1:1
-        if length(indices[i])+num[2]>=min_bin_number_ends
+        if length(bandi[i])+num[1]>=min_bin_number_ends
             break
         end
+        num[1] +=length(bandi[i])
+    end
+    for i = length(bandi):-1:1
         inds2pop[2] = i
-        num[2] +=length(indices[i])
+        if length(bandi[i])+num[2]>=min_bin_number_ends
+            break
+        end
+        num[2] +=length(bandi[i])
     end
     # add the dropped cells to the next/previous band
-    append!(indices[inds2pop[1]], vcat(indices[1:inds2pop[1]-1]...))
-    append!(indices[inds2pop[2]], vcat(indices[inds2pop[2]+1:end]...))
-    return bins[inds2pop[1]:inds2pop[2]], indices[inds2pop[1]:inds2pop[2]]
+    append!(bandi[inds2pop[1]], vcat(bandi[1:inds2pop[1]-1]...))
+    append!(bandi[inds2pop[2]], vcat(bandi[inds2pop[2]+1:end]...))
+    return bins[inds2pop[1]:inds2pop[2]], bandi[inds2pop[1]:inds2pop[2]]
 end
 
 
