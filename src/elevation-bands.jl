@@ -59,7 +59,7 @@ function make_1Dglacier(dem::Gridded, binsize_or_bins, glaciermask=trues(size(de
     bands, bandi = bin_grid(dem, binsize_or_bins, glaciermask,
                             binround=binround, min_bin_number_ends=min_bin_number_ends,
                             min_bands=min_bands)
-    @assert length(bands)>=min_bands "Need at least three elevation bins"
+    @assert length(bands)>=min_bands "Need at least $min_bands elevation bins, only got $(length(bands))"
 
     nb = length(bands)
     cellsz = step(dem.x)^2
@@ -106,7 +106,8 @@ function make_1Dglacier(dem::Gridded, binsize_or_bins, glaciermask=trues(size(de
     if window_width_smooth>0
         widths = boxcar(widths, round(Int, window_width_smooth/mean(dzs) ))
         for i=1:nb
-            lengths[i] = areas[i]/widths[i]
+            # make sure length is zero when area is zero
+            lengths[i] = areas[i]==widths[i]==0 ? zero(lengths[i]) : areas[i]/widths[i]
             malphas[i] = atan(dzs[i]/lengths[i])
             @assert malphas[i]>=0
         end
@@ -202,10 +203,12 @@ Return:
 - bandi -- a Vector{Vector{Int}} of length(bands) with each element
            containing the indices of cells in the band
 """
-bin_grid(g::Gridded, binsize_or_bins, mask=BitArray([]);
-         binround=_binround(binsize_or_bins), min_bin_number_ends=0, min_bands=4) =
-             bin_grid(g.v, binsize_or_bins, mask; binround=binround, min_bin_number_ends=min_bin_number_ends,
-                      min_bands=min_bands)
+function bin_grid(g::Gridded, binsize_or_bins, mask=BitArray([]);
+                  binround=_binround(binsize_or_bins), min_bin_number_ends=0, min_bands=4)
+    bin_grid(g.v, binsize_or_bins, mask;
+             binround=binround, min_bin_number_ends=min_bin_number_ends,
+             min_bands=min_bands)
+end
 function bin_grid(v::Matrix, binsize::Number, mask=BitArray([]);
                   binround=_binround(binsize), min_bin_number_ends=0, min_bands=4)/
     if isempty(mask)
