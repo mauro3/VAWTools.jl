@@ -465,14 +465,15 @@ is used.
 @enum Orientation nohand=0 lefthand=1 righthand=2
 
 """
-One cell-edge of a regular gird of cells.
+One cell-edge of a regular gird of cells.  Specified as a cell
+and which edge of the four edges of a cell.
 
 TODO:
 Arguably not the best datastructure for what is done below.
 """
 immutable Edge
-    i::Int # cell ind
-    j::Int # cell ind
+    i::Int # cell ind x-direction
+    j::Int # cell ind y-direction
     loc::Loc
 end
 const noedge = Edge(-1,-1,_noedge)
@@ -660,7 +661,7 @@ Returns `boundaries` which is `bandnr => otherbandnr => Vector{Line}`
 i.e. the collection of all boundary lines for each
 `(bandnr,otherbandnr)`.  Each line has the elevation band on its
 *left*.  For cells outside the glacier `otherbandnr==0` except if
-'landmask` is given, then sea-cells have `otherbandnf==-1`.
+'landmask` is given, then sea-cells have `otherbandnr==-1`.
 
 Of type `Vector{Dict{Int,Vector{Line}}}()`.
 """
