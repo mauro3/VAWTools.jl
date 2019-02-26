@@ -855,63 +855,104 @@ function read_geotiff(filepath::AbstractString, T=Float32; bandnr=1, NA=convert(
 end
 
 """
-
-There are some tricks to make sparse geotiffs small but the right NA
-values need to be used for compression to work well.
-
-https://github.com/yeesian/ArchGDAL.jl/issues/39
-"""
-function write_geotiff(g::Gridded{T}, filepath::AbstractString;
-                       size=size(g), # if the geotiff size is different to gridded size
-                       xinds = 1:length(g.x), # to place it
-                       yinds = 1:length(g.y), #
+    write_geotiff(g::Vector{Gridded{T}}, filepath::AbstractString;
+                       size_=size(g[1]), # if the geotiff size is different to gridded size
+                       xinds = 1:length(g[1].x), # to place it
+                       yinds = 1:length(g[1].y), #
+                       nodataval=[NaN, -3.697314e28][1] # https://maurow.bitbucket.io/notes/packbits-geotiffs.html
                        ) where T
+
+Write a vector of Gridded into the bands of a geotiff.
+"""
+function write_geotiff(g::Vector{Gridded{T}}, filepath::AbstractString;
+                       size_=size(g[1]), # if the geotiff size is different to gridded size
+                       xinds = 1:length(g[1].x), # to place it
+                       yinds = 1:length(g[1].y), #
+                       nodataval=[NaN, -3.697314e28][1], # https://maurow.bitbucket.io/notes/packbits-geotiffs.html
+                       colornames=["gray", ["undefined" for i=2:length(g)]...]) where T
+    dx = step(g[1].x)
+    dy = step(g[1].y)
     AG = ArchGDAL
-    out = AG.registerdrivers() do
+    AG.registerdrivers() do
         AG.create(
             filepath,
             AG.getdriver("GTiff"),
-            width = size[2],
-            height = size[1],
-            nbands = 1,
-            dtype = T,
+            width = size_[1],
+            height = size_[2],
+            nbands = length(g),
+            dtype = T
         ) do raster
-            AG.setproj!(raster, AG.toWKT( AG.importPROJ4(g.proj)))
-            AG.write!(
-                raster,
-                g.v[:,end:-1:1],
-                1, # update band 1
-                xinds, # along (window) xcoords 30 to 180
-                yinds # along (window) ycoords 30 to 180
-            )
+            AG.setproj!(raster, AG.toWKT( AG.importPROJ4(g[1].proj)))
+            # https://www.gdal.org/gdal_datamodel.html
+            top = g[1].y[end] + dy/2
+            left = g[1].x[1] - dx/2
+            AG.setgeotransform!(raster, [left, dx, 0, top, 0, -dy])
+            for (i,gg) in enumerate(g)
+                @assert gg.x==g[1].x
+                @assert gg.y==g[1].y
+                AG.write!(
+                    raster,
+                    gg.v[:,end:-1:1],
+                    i, # update band i
+                    yinds, # along (window) xcoords
+                    xinds # along (window) ycoords
+                )
+                AG.setnodatavalue!(AG.getband(raster,i), nodataval)
+                AG.setname!(AG.getband(raster,i), colornames[i])
+            end
         end
     end
     nothing
 end
 
 """
-
-
+Use gdal_merge.py
 
 https://github.com/yeesian/ArchGDAL.jl/issues/39
 """
-function update_geotiff(g::Gridded{T}, filepath::AbstractString,
-                       xinds, yinds) where T
+function update_geotiff(g::Gridded{T}, filepath::AbstractString) where T
+    error("not implemented")
+
     AG = ArchGDAL
-    out = AG.registerdrivers() do
+    # figure out extent
+    w, h, na, gt, proj4 = AG.registerdrivers() do
+        AG.read(filepath) do dataset
+            band = AG.getband(dataset, 1)
+            w, h = AG.width(band), AG.height(band)
+            na = AG.getnodatavalue(band)
+            gt = AG.getgeotransform(dataset)
+            proj4 = strip(AG.toPROJ4(AG.importWKT(AG.getproj(dataset))))
+            (w, h, na, gt, proj4)
+        end
+    end
+
+
+
+    AG.registerdrivers() do
         AG.update(filepath) do raster
             AG.write!(
                 raster,
                 g.v[:,end:-1:1],
                 1, # update band 1
-                xinds, # along (window) xcoords 30 to 180
-                yinds # along (window) ycoords 30 to 180
+                xcoords, # along (window) xcoords
+                ycoords # along (window) ycoords
             )
         end
     end
     nothing
 end
 
+function compress_geotiff(fl, method=PACKBITS)
+    AG = ArchGDAL
+    fl1 = splitext(fl)[1]*"-comp.tif"
+    nodata = AG.registerdrivers() do
+        AG.read(fl) do dataset
+            band = AG.getband(dataset, 1)
+            AG.getnodatavalue(band)
+        end
+    end
+    run(`gdalwarp -overwrite -srcnodata $nodata -dstnodata -3.697314e28  -ot float32 -co COMPRESS=$method $fl $fl1`)
+end
 
 ## Shapefiles
 import Shapefile, GeoInterface
