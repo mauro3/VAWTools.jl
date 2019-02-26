@@ -858,57 +858,60 @@ end
 
 There are some tricks to make sparse geotiffs small but the right NA
 values need to be used for compression to work well.
-"""
-function write_geotiff()
 
+https://github.com/yeesian/ArchGDAL.jl/issues/39
+"""
+function write_geotiff(g::Gridded{T}, filepath::AbstractString;
+                       size=size(g), # if the geotiff size is different to gridded size
+                       xinds = 1:length(g.x), # to place it
+                       yinds = 1:length(g.y), #
+                       ) where T
+    AG = ArchGDAL
+    out = AG.registerdrivers() do
+        AG.create(
+            filepath,
+            AG.getdriver("GTiff"),
+            width = size[2],
+            height = size[1],
+            nbands = 1,
+            dtype = T,
+        ) do raster
+            AG.setproj!(raster, AG.toWKT( AG.importPROJ4(g.proj)))
+            AG.write!(
+                raster,
+                g.v[:,end:-1:1],
+                1, # update band 1
+                xinds, # along (window) xcoords 30 to 180
+                yinds # along (window) ycoords 30 to 180
+            )
+        end
+    end
+    nothing
 end
 
-# # Make RasterIO conditional as it is not Julia 0.6 compatible
-# if haskey(Pkg.installed(), "RasterIO")
-#     println("Enabling RasterIO function read_rasterio")
-#     eval(quote
-#         import RasterIO
-#         """
-#         read_rasterio(fn::AbstractString, T=Float32; NA=convert(T,NaN))
+"""
 
-#         Read various raster formats via the RasterIO.jl package.  Put output
-#         into a Gridded instance and the Proj4 projection string.
-#         """
-#         function read_rasterio(fn::AbstractString, T=Float32; NA=convert(T,NaN))
-#             ra = RasterIO.openraster(fn)
-#             nr = ra.height
-#             nc = ra.width
-#             #proj = RasterIO.getprojection(ra.dataset)
-#             proj4 = try # some computers may not have gdalsrsinfo installed
-#                 strip(readstring(`gdalsrsinfo -o proj4 $fn`), ['\n', '\'', ' '])
-#             catch
-#                 ""
-#             end
-#             va = convert(Matrix{T}, RasterIO.fetch(ra,1))
-#             # get the NoData value
-#             aa = Cint[0]
-#             nodata, success = getrasternodatavalue(RasterIO.getrasterband(ra.dataset,1))
-#             if success
-#                 for i in eachindex(va)
-#                     if va[i]==nodata
-#                         va[i] = NA
-#                     end
-#                 end
-#             end
-#             gt = RasterIO.geotransform(ra)
-#             origin = gt[[1,4]]
-#             xll,yll = RasterIO.applygeotransform(gt, 0.0, Float64(ra.height))
-#             pixelsz = gt[[2,6]]
-#             dx = pixelsz[1]
-#             dy = -pixelsz[2]
-#             @assert gt[[3,5]]==[0,0] "Can only handle North-up images"
-#             #Gridded(VAWTools.AGR(va', nc, nr, xll, yll, dx, nodata)), proj
-#             Gridded(range(xll+dx/2, dx, nc),
-#                     range(yll+dy/2, dy, nr),
-#                     true, flipdim(va,2)), proj4
-#         end
-#     end)
-# end
+
+
+https://github.com/yeesian/ArchGDAL.jl/issues/39
+"""
+function update_geotiff(g::Gridded{T}, filepath::AbstractString,
+                       xinds, yinds) where T
+    AG = ArchGDAL
+    out = AG.registerdrivers() do
+        AG.update(filepath) do raster
+            AG.write!(
+                raster,
+                g.v[:,end:-1:1],
+                1, # update band 1
+                xinds, # along (window) xcoords 30 to 180
+                yinds # along (window) ycoords 30 to 180
+            )
+        end
+    end
+    nothing
+end
+
 
 ## Shapefiles
 import Shapefile, GeoInterface
