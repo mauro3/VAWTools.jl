@@ -898,7 +898,7 @@ function write_geotiff(g::Vector{Gridded{T}}, filepath::AbstractString;
                     xinds # along (window) ycoords
                 )
                 AG.setnodatavalue!(AG.getband(raster,i), nodataval)
-                AG.setname!(AG.getband(raster,i), colornames[i])
+                # AG.setname!(AG.getband(raster,i), colornames[i])  # does not work
             end
         end
     end
