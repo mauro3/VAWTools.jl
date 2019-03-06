@@ -36,7 +36,8 @@ function make_1Dglacier(dem::Gridded, binsize_or_bins, glaciermask=trues(size(de
                         window_width_smooth=0.0,
                         alpha_min=deg2rad(0.4),
                         alpha_max=deg2rad(60.0),
-                        FILL=-9999999.0)
+                        FILL=-9999999.0,
+                        verbose=true)
     dx = step(dem.x)
     # Smooth dem to get smooth alpha, smoother bands.  This is in
     # particular important when there is cross-flow bumpiness, such as
@@ -126,7 +127,7 @@ function make_1Dglacier(dem::Gridded, binsize_or_bins, glaciermask=trues(size(de
     tmp = sum(glaciermask,1)
     yextent = (findlast(tmp.>0)-findfirst(tmp.>0))*dx
     box_diag = sqrt(xextent^2 + yextent^2)
-    if abs(sum(lengths)-box_diag)/box_diag>0.4
+    if verbose && abs(sum(lengths)-box_diag)/box_diag>0.4
         warn("Glacier length from might be wrong. Band-length: $(sum(lengths)/1e3)km, bounding-box diag: $(box_diag/1e3)km")
     end
 
