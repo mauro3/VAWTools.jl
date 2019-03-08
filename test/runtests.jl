@@ -1,6 +1,6 @@
 using VAWTools
 using Test
-using SHA, Compat
+using SHA
 
 function sha(fn)
     open(fn) do f

@@ -1,5 +1,6 @@
 module VAWTools
 using Parameters
+using Printf
 
 include("other-pks-fixes.jl")
 
@@ -58,7 +59,7 @@ TODO:
     midpoint::Bool=true  # if true, the (x,y) is cell midpoint, otherwise lower-left corner
     proj::String="" # Proj4 string
 end
-Gridded(x,y,v::Matrix{T}) where T = Gridded{T}(x,y,v,Matrix{T}(0,0),true,"")
+Gridded(x,y,v::Matrix{T}) where T = Gridded{T}(x,y,v,Matrix{T}(undef,0,0),true,"")
 Gridded(x,y,v::Matrix{T},err) where T = Gridded{T}(x,y,v,err,true,"")
 
 """
@@ -141,7 +142,7 @@ Be sure to be clear whether x corresponds to cell centers or boundaries.
     x::StepRangeLen{Float64,Base.TwicePrecision{Float64},Base.TwicePrecision{Float64}}
     v::Vector{T} # values
     @assert size(v)==(length(x), )
-    err::Vector{T}=Vector{eltype(v)}(0) # error of values
+    err::Vector{T}=Vector{eltype(v)}(undef, 0) # error of values
     @assert size(v)==size(err) || size(err)==(0,)
     midpoint::Bool=true  # if true, the (x) is cell midpoint, otherwise lower corner
     proj::String="" # Proj4 string
@@ -176,7 +177,7 @@ There are constructors to leave off v, err, splits and proj.
     @assert length(x)==length(y)
     v::Vector{T}=Void[]
     @assert length(v)==length(y) || length(v)==0
-    err::Vector{T}=Vector{eltype(v)}(0)
+    err::Vector{T}=Vector{eltype(v)}(undef, 0)
     @assert length(err)==length(y) || length(err)==0
     splits::Vector{UnitRange{Int}}=UnitRange{Int}[1:length(x)]
     proj::String="" # Proj4 string
@@ -335,8 +336,8 @@ function Gridded(agr::AGR{T}; NA=convert(T,NaN)) where T
         end
         proj = ""
     end
-    Gridded(range(agr.xll+agr.dx/2, agr.dx, agr.nc),
-            range(agr.yll+agr.dx/2, agr.dx, agr.nr),
+    Gridded(range(agr.xll+agr.dx/2, step=agr.dx, length=agr.nc),
+            range(agr.yll+agr.dx/2, step=agr.dx, length=agr.nr),
             v,
             zeros(T,0,0),
             true,
@@ -437,7 +438,7 @@ function _read_agr(io::IO, T=Float32)
         # read extra header
         extra_header = read(io, Float32, 6)
         # read values
-        va = read(io, Float32, nc, nr).'
+        va = permutedims(read(io, Float32, nc, nr))
         if eltype(va)!=T
             error("Not implemented yet")
         end
@@ -445,7 +446,7 @@ function _read_agr(io::IO, T=Float32)
             @warn("End-of-file was not reached!")
         end
     else
-        va = Array{T}(nr, nc)
+        va = Array{T}(undef, nr, nc)
         # no extra header for ascii .agr
         extra_header = zeros(Float32, 6)
         # read values
@@ -718,7 +719,7 @@ function concat_poly(mpoly::Vector)
     # total size is sum of sizes plus one extra point for all but the
     # first poly.
     totsize = mapreduce(x->size(x,2), +, mpoly) + length(mpoly) -1
-    bigpoly = Array{T}(size(mpoly[1],1),totsize)
+    bigpoly = Array{T}(undef, size(mpoly[1],1), totsize)
     splits = Int[]
     is = 1
     for i=1:length(mpoly)
@@ -805,8 +806,8 @@ import Proj4
 #             dy = -pixelsz[2]
 #             @assert gt[[3,5]]==[0,0] "Can only handle North-up images"
 #             #Gridded(VAWTools.AGR(va', nc, nr, xll, yll, dx, nodata)), proj
-#             Gridded(range(xll+dx/2, dx, nc),
-#                     range(yll+dy/2, dy, nr),
+#             Gridded(range(xll+dx/2, step=dx, length=nc),
+#                     range(yll+dy/2, step=dy, length=nr),
 #                     true, flipdim(va,2)), proj4
 #         end
 #     end)
@@ -881,8 +882,8 @@ end
 
 Transform between projections.  Uses Proj4.jl.  Example:
 
-    longlat = "+proj=longlat"
-    utm56 = "+proj=utm +zone=56 +south"
+    longlat = "+proj=longlat +datum=WGS84"
+    utm56 = "+proj=utm +zone=56 +south +datum=WGS84"
     transform_proj([6e3,197e3], utm56, longlat)
 
 Input:
@@ -974,10 +975,10 @@ TODO:
 struct UniformArray{T,N} <: AbstractArray{T,N}
     val::T
 end
-Base.size(::UniformArray{T,N}) where {T,N} = ntuple(x->typemax(Int), Val{N})
+Base.size(::UniformArray{T,N}) where {T,N} = ntuple(x->typemax(Int), Val(N))
 Base.getindex(A::UniformArray, i::Int) = A.val
 Base.IndexStyle(::Type{U}) where {U<:UniformArray} = IndexLinear()
-Base.start(::UniformArray) = error("Cannot iterate over UniformArray")
+Base.iterate(::UniformArray, args...) = error("Cannot iterate over UniformArray")
 # Does not work https://github.com/JuliaLang/julia/issues/18004
 #Base.show{T,N}(io::IO, u::UniformArray{T,N}) = print(io, "UniformArray{$T,$N} with value $(u.val)")
 Base.show(io::IO, ::MIME"text/plain", u::UniformArray{T,N}) where {T,N} = print(io, "UniformArray{$T,$N} with value $(u.val)")
@@ -993,7 +994,7 @@ times a polygon winds around the point.
 
 It follows Dan Sunday: http://geomalgorithms.com/a03-_inclusion.html.
 """
-function windnr(p, poly::Matrix)
+function windnr(p, poly::AbstractMatrix)
     @assert size(poly,1)==2
     @assert size(poly,2)>1
     @assert length(p)==2
@@ -1058,7 +1059,7 @@ points as exterior which are inside outcrops.  See test for a test.
 Note that points located on a right-side boundary edge are outside,
 and ones on a left-side edge are inside.
 """
-inpoly(p, poly::Matrix) = isodd(windnr(p,poly))
+inpoly(p, poly::AbstractMatrix) = isodd(windnr(p,poly))
 
 # Other inpoly algo here:
 # https://github.com/helenchg/PolygonClipping.jl/blob/1fc74ab797c6585795283749b7c4cc9cb2000243/src/PolygonClipping.jl#L139
@@ -1373,7 +1374,7 @@ function boxcar(A::AbstractArray, windows::Tuple)
     for I in R # @inbounds does not help
         out[I] = NaN
         n, s = 0, zero(eltype(out))
-        for J in CartesianIndices(max(I1, I-I_l), min(Iend, I+I_u))
+        for J in CartesianIndices(UnitRange.(max(I1, I-I1).I , min(Iend, I+I1).I) ) # used to be CartesianRange(max(I1, I-I_l), min(Iend, I+I_u) )
             if !isnan(A[J])
                 s += A[J]
                 n += 1
@@ -1398,21 +1399,21 @@ function boxcar(A::AbstractArray, windows::Tuple{<:AbstractFloat,<:AbstractFloat
         out[I] = NaN
         n, s = zero(eltype(out)), zero(eltype(out))
         # lower fractional-cells
-        for J in CartesianIndices(max(I1, I-I_ll), I-I_l-1)
+        for J in CartesianIndices( UnitRange.(  max(I1, I-I_ll).I , (I-I_l-one(I)).I) ) # CartesianIndices(max(I1, I-I_ll), I-I_l-1)
             if !isnan(A[J])
                 s += A[J] * weight_lower
                 n += weight_lower
             end
         end
         # normal window
-        for J in CartesianIndices(max(I1, I-I_l), min(Iend, I+I_u))
+        for J in CartesianIndices(UnitRange.(max(I1, I-I_l).I , min(Iend, I+I_u).I) ) # CartesianIndices(max(I1, I-I_l), min(Iend, I+I_u))
             if !isnan(A[J])
                 s += A[J]
                 n += 1
             end
         end
         # upper fractional-cells
-        for J in CartesianIndices(I+I_u+1, min(Iend, I+I_uu))
+        for J in CartesianIndices(UnitRange.((I+I_u+one(I)).I , min(Iend, I+I_uu).I) ) # CartesianIndices(I+I_u+1, min(Iend, I+I_uu))
             if !isnan(A[J])
                 s += A[J] * weight_upper
                 n += weight_upper
@@ -1432,7 +1433,7 @@ function boxcar(A::AbstractArray, windows::Tuple{<:AbstractArray, <:AbstractArra
         n, s = 0, zero(eltype(out))
         I_l = CartesianIndex(I1.I.*window_lower[I])
         I_u = CartesianIndex(I1.I.*window_upper[I])
-        for J in CartesianIndices(max(I1, I-I_l), min(Iend, I+I_u))
+        for J in CartesianIndices(UnitRange.(max(I1, I-I1).I , min(Iend, I+I1).I) ) # used to be CartesianRange(max(I1, I-I_l), min(Iend, I+I_u) )
             if !isnan(A[J])
                 s += A[J]
                 n += 1
@@ -1450,7 +1451,7 @@ end
 #     out = zeros(A)
 #     # make an accumulator type closed under addition (needed for Bools):
 #     T = typeof(one(eltype(weights)) + one(eltype(weights)))
-#     R = CartesianRange(size(A))
+#     R = CartesianIndices(size(A))
 #     I1, Iend = first(R), last(R)
 #     @inbounds @fastmath for I in R
 #         if weights[I]==0
@@ -1458,7 +1459,7 @@ end
 #             continue
 #         end
 #         n, s = zero(T), zero(eltype(out))
-#         for J in CartesianRange(max(I1, I-I1*window), min(Iend, I+I1*window))
+#         for J in CartesianIndices(max(I1, I-I1*window), min(Iend, I+I1*window))
 #             s += A[J]*weights[J]
 #             n += weights[J]
 #         end
@@ -1475,7 +1476,7 @@ function boxcar(A::AbstractArray{T,N}, windows::Tuple,
                 dropmask::AbstractArray=(weights.==0)) where {T,N}
     @assert size(weights)==size(A)
     window_lower, window_upper = windows
-    out = zeros(A)
+    out = fill(0.0, size(A))
     # make an accumulator type closed under addition (needed for Bools):
     AT = typeof(one(eltype(weights)) + one(eltype(weights)))
     R = CartesianIndices(size(A))
@@ -1487,7 +1488,7 @@ function boxcar(A::AbstractArray{T,N}, windows::Tuple,
             out[I] = A[I]
         else
             n, s = zero(AT), zero(T)
-            for J in CartesianRange(max(I1, I-I_l), min(Iend, I+I_u))
+            for J in CartesianIndices(UnitRange.(max(I1, I-I1).I , min(Iend, I+I1).I) ) # used to be CartesianRange(max(I1, I-I_l), min(Iend, I+I_u) )
                 AJ, w = A[J], weights[J]
                 # if !isnan(AJ)
                 s += AJ * convert(T, w)
@@ -1524,7 +1525,7 @@ Apply with
 function boxcar_matrix(::Type{T}, window::Integer,
                        weights::AbstractArray{TT,N},
                        dropmask::AbstractArray=(weights.==0)) where {T,TT,N}
-                               # dropmask::AbstractArray=BitArray{N}(ntuple(x->0, Val{N})...))
+                               # dropmask::AbstractArray=BitArray{N}(ntuple(x->0, Val(N))...))
     # make an accumulator type closed under addition (needed for Ints and Bools):
     Tacc = promote_type(T, eltype(weights))
     nr = size(weights,1)
@@ -1548,7 +1549,7 @@ function boxcar_matrix(::Type{T}, window::Integer,
         end
         nrows = 0 # number of contributing cells
         acc = zero(Tacc) # sum of all weights for one cell
-        for J in CartesianRange(max(I1, I-I1*window), min(Iend, I+I1*window))
+        for J in CartesianIndices(UnitRange.(max(I1, I-I1*window).I , min(Iend, I+I1*window).I) ) # CartesianIndices(max(I1, I-I1*window), min(Iend, I+I1*window))
             if weights[J]==0
                 continue
             end
