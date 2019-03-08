@@ -14,5 +14,10 @@ julia> Pkg.clone("git@github.com:mauro3/VAWTools.jl.git")
 ```
 
 TODO:
+- [ ] fix broken tests
+- [ ] update from branch j0.6
+  - ArchGDAL
+  - elevation bands
+- [ ] Update to new Cartesian indexing https://julialang.org/blog/2016/02/iteration
 - [ ] provide documentation
 - [ ] more tests & enable coverage

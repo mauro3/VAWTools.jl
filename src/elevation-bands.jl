@@ -114,10 +114,10 @@ function make_1Dglacier(dem::Gridded, binsize_or_bins, glaciermask=trues(size(de
         error("Something's amiss, sum of area of bands $(sum(areas)) not equal total area $totalarea,")
     end
     # check band length against diagonal
-    tmp = sum(glaciermask,2)
-    xextent = (findlast(tmp.>0)-findfirst(tmp.>0))*dx
-    tmp = sum(glaciermask,1)
-    yextent = (findlast(tmp.>0)-findfirst(tmp.>0))*dx
+    tmp = sum(glaciermask, dims=2)[:]
+    xextent = (findlast(tmp.>0)-findfirst(tmp.>0)).*dx
+    tmp = sum(glaciermask, dims=1)[:]
+    yextent = (findlast(tmp.>0)-findfirst(tmp.>0)).*dx
     box_diag = sqrt(xextent^2 + yextent^2)
     if abs(sum(lengths)-box_diag)/box_diag>0.4
         warn("Glacier length from might be wrong. Band-length: $(sum(lengths)/1e3)km, bounding-box diag: $(box_diag/1e3)km")
@@ -379,16 +379,16 @@ function bandi_for_other_grid(bands, bandi, binmat::Matrix{Int}, g::Gridded,
     @assert size(othergrid)==size(othermask)
     if g.x!=og.x || g.y!=og.y
         bandi_ = [Int[] for i=1:length(bands)]
-        dims = size(og.v)
+        s2i = LinearIndices(og.v)
         itpm = Interpolations.interpolate((g.x, g.y), binmat,
                             Interpolations.Gridded(Interpolations.Constant()) );
         itpm = Interpolations.extrapolate(itpm, 0);
         for j=1:size(og.v,2)
             for i=1:size(og.v,1)
                 if othermask[i,j]
-                    ind = convert(Int, itpm[og.x[i], og.y[j]])
+                    ind = convert(Int, itpm(og.x[i], og.y[j]))
                     if ind>0
-                        push!(bandi_[ind], sub2ind(dims, i, j))
+                        push!(bandi_[ind], s2i[i, j])
                     end
                 end
             end
@@ -554,7 +554,9 @@ which maps (bandnr,otherbandnr) => Set of edges
 
 """
 function get_cells_on_boundary(bands, bandi, binmat, landmask=nothing)
+    error("Not updated to Julia 1.0 yet")
     dims = size(binmat)
+    i2s = CartesianIndices(binmat)
 
     if landmask!=nothing
         # encode sea cells in binmat
@@ -570,7 +572,7 @@ function get_cells_on_boundary(bands, bandi, binmat, landmask=nothing)
     # which cell-edges are on the boundary:
     for (ib,bup) in enumerate(bands)
         for I in bandi[ib]
-            i,j = ind2sub(dims, I)
+            i,j = i2s[I].I
             loc = 1
             # left-right
             for ii=-1:2:1

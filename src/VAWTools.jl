@@ -1,8 +1,6 @@
 module VAWTools
 using Parameters
-using Printf
-
-include("other-pks-fixes.jl")
+using Printf, SparseArrays, Statistics
 
 # General tools, maybe applicable more widely.
 export read_agr, write_agr, read_xyn, inpoly, AGridded, Gridded, Gridded1d, Traj,
@@ -70,9 +68,14 @@ the window is chosen such that there is no overlap (for odd `step`) or
 one cell overlap (for even `step`).
 
 """
-function downsample(g::Gridded, step, start=1, average=true, averagemask=UniformArray{Bool,2}(true))
-    rx = start:step:size(g.v,1)
-    ry = start:step:size(g.v,2)
+function downsample(g::Gridded, step, start=1, average=true, averagemask=UniformArray{Bool,2}(true); stop=size(g.v))
+    if start isa Number
+        rx = start:step:stop[1]
+        ry = start:step:stop[2]
+    else
+        rx = start[1]:step:stop[1]
+        ry = start[2]:step:stop[2]
+    end
     nx,ny = length(rx),length(ry)
     @assert nx>1
     @assert ny>1
@@ -124,6 +127,23 @@ function _downsample_boxcar(v,rx,ry,window,averagemask)
     return vnew
 end
 
+import Interpolations
+"""
+    upsample(g::Gridded, x, y)
+
+Upsample to match x, y.
+"""
+function upsample(g::Gridded, x, y)
+    gi  = Interpolations.interpolate((g.x, g.y), g.v, Interpolations.Gridded(Interpolations.Linear()) )
+    if haserror(g)
+        gie  = Interpolations.interpolate((g.x, g.y), g.err, Interpolations.Gridded(Interpolations.Linear()) )
+        return Gridded(x, y, [gi[xx,yy] for xx=x, yy=y],
+                [gie[xx,yy] for xx=x, yy=y])
+    else
+        return Gridded(x, y, [gi[xx,yy] for xx=x, yy=y])
+    end
+end
+
 function (+)(g1::Gridded, g2::Gridded)
     @assert g1.midpoint==g2.midpoint
     @assert g1.proj==g2.proj
@@ -170,6 +190,8 @@ Fields:
 - proj::String a string interpretable by Proj4
 
 There are constructors to leave off v, err, splits and proj.
+
+TODO: having the `splits` is probably worse than just using a list of trajectories.
 """
 @with_kw mutable struct Traj{T}
     x::Vector{Float64}
@@ -186,6 +208,23 @@ Traj(x,y) = Traj{Nothing}(x,y,Nothing[],Nothing[],UnitRange{Int}[1:length(x)],""
 Traj(x,y,v::AV) where AV<:AbstractVector{T} where T = Traj{T}(x,y,v,T[],UnitRange{Int}[1:length(x)],"")
 Traj(x,y,v::AV,err) where AV<:AbstractVector{T} where T = Traj{T}(x,y,v,err,UnitRange{Int}[1:length(x)],"")
 Traj(x,y,v::AV,err,splits) where AV<:AbstractVector{T} where T = Traj{T}(x,y,v,err,splits,"")
+function Traj(t::Traj, inds::Vector{Int})
+    x,y,v,err,splits = similar(t.x,0), similar(t.y,0), similar(t.v,0), similar(t.err,0), similar(t.splits,0)
+    s1 = length(x)
+    for i in inds
+        append!(x, t.x[t.splits[i]])
+        append!(y, t.y[t.splits[i]])
+        if length(t.v)>0
+            append!(v, t.v[t.splits[i]])
+        end
+        if length(t.err)>0
+            append!(err, t.err[t.splits[i]])
+        end
+        push!(splits, s1+1:length(x))
+        s1 = length(x)
+    end
+    Traj(x,y,v,err,splits,t.proj)
+end
 
 hasvalues(g::Traj) = length(g.v)!=0
 haserror(g::Traj) = length(g.err)!=0
@@ -195,7 +234,7 @@ length(g::Traj) = length(g.x)
 """
     split_traj!{T<:Traj}(t::T, dist)
 
-Splits trajectory into several
+Splits trajectory into several between points farther apart than `dist`.
 """
 function split_traj!(t::T, dist) where T<:Traj
     ii = 1
@@ -232,9 +271,9 @@ struct AGR{T} # Ascii GRid
     v::Matrix{T}    # values: orientation is awkward, as in the AGR file, see https://en.wikipedia.org/wiki/Esri_grid
     nc::Int64       # NCOLS TODO: remove those
     nr::Int64       # NROWS
-    xll::T          # XLLCORNER
-    yll::T          # YLLCORNER
-    dx::T           # CELLSIZE
+    xll::Float64    # XLLCORNER
+    yll::Float64    # YLLCORNER
+    dx::Float64     # CELLSIZE
     NA::T           # NODATA
     hasutm::Bool    # Matthias sometimes abuses the NODATA_value field as UTM-zone field
     extra_header::Vector{Float32} # the .bin files have space for
@@ -326,7 +365,7 @@ function Gridded(agr::AGR{T}; NA=convert(T,NaN)) where T
     #    v = my_rotr90(agr.v)
     v = rotr90(agr.v)
     if agr.hasutm
-        proj = "+proj=utm +zone=$(Int(agr.NA))"
+        proj = "+proj=utm +zone=$(Int(agr.NA)) +datum=WSG84"
     else
         # only swap NA if it has a FILL value:
         if !isequal(NA, agr.NA)
@@ -414,9 +453,9 @@ function _read_agr(io::IO, T=Float32)
     # read header
     nc = toT(io, Int)
     nr = toT(io, Int)
-    xll = toT(io,T)
-    yll = toT(io,T)
-    dx = toT(io,T)
+    xll = toT(io,Float64)
+    yll = toT(io,Float64)
+    dx = toT(io,Float64)
     # Matthias sometimes abuses the NODATA_value field as UTM-zone field
     # in non-binary grids:
     if isbin_file(io)
@@ -436,9 +475,11 @@ function _read_agr(io::IO, T=Float32)
 
     if isbin_file(io)
         # read extra header
-        extra_header = read(io, Float32, 6)
+        extra_header = Array{Float32}(undef, 6)
+        read!(io, extra_header)
         # read values
-        va = permutedims(read(io, Float32, nc, nr))
+        va = Array{Float32}(undef, nc, nr)
+        va = permutedims(read!(io, va))
         if eltype(va)!=T
             error("Not implemented yet")
         end
@@ -506,7 +547,7 @@ function get_utm_asciigrid(io::IO)
         # error("No field UTM_ZONE found")
     end
     utm = parse(Int,val)
-    return "+proj=utm +zone=$(utm)"
+    return "+proj=utm +zone=$(utm) +datum=WGS84"
 end
 
 """Write Ascii grid.
@@ -533,8 +574,8 @@ function write_agr(g::AGR{T_}, fn::AbstractString; NA=nothing, T=T_) where T_
     if !isbin_file(fn)
         ext = splitext(fn)[2]
         if ext==".grid" || ext==".asc"
-            println("Changing extension to .agr")
-            ext = ".agr"
+            # println("Changing extension to .agr")
+            # ext = ".agr"
         elseif ext!=".agr"
             error("unsupported extension")
         end
@@ -655,7 +696,7 @@ function read_xyn(fn; hasz=false, fix=false)
     drop20 = false
     while i<=n
         if l[i]!=21
-            error("Malformed file: Expected 21 on line $i.")
+            error("Malformed file $fn: Expected 21 on line $i.")
         end
         # start a new polygon
         i += 1
@@ -685,7 +726,7 @@ function read_xyn(fn; hasz=false, fix=false)
             if fix
                 out[end] = hcat(out[end], out[end][:,1])
             else
-                error("Malformed file: polygon $is:$iend not closed")
+                error("Malformed file $fn: polygon $is:$iend not closed")
             end
         end
 
@@ -708,14 +749,29 @@ returns indices where to split apart again.  The concatenated polygon
 is fully connected, with an edge going back to the first point.  This
 allows to use `inpoly`, at least if the inner polygons have different
 orientation to the outer. Also note that the input and output polygons
-are closed, i.e. last point == first point.
+are closed, i.e. last point == first point (this can be fixed by setting
+the option `close_poly=true`)
+
 
 Return:
 - bigpoly -- with size==(2,n)
 - splits -- ith poly has indices splits[i]:splits[i+1]-1
 """
-function concat_poly(mpoly::Vector)
+function concat_poly(mpoly::Vector; close_poly=false)
     T = eltype(mpoly[1])
+    # check that they are all closed
+    if close_poly
+        mpoly = deepcopy(mpoly)
+    end
+    for i=1:length(mpoly)
+        if mpoly[i][:,1]!=mpoly[i][:,end]
+            if close_poly
+                mpoly[i] = hcat(mpoly[i], mpoly[i][:,1])
+            else
+                error("All input polys need to be closed.")
+            end
+        end
+    end
     # total size is sum of sizes plus one extra point for all but the
     # first poly.
     totsize = mapreduce(x->size(x,2), +, mpoly) + length(mpoly) -1
@@ -724,7 +780,6 @@ function concat_poly(mpoly::Vector)
     is = 1
     for i=1:length(mpoly)
         push!(splits, is)
-        @assert mpoly[i][:,1]==mpoly[i][:,end] "All input polys need to be closed."
         bigpoly[:,is:is+size(mpoly[i],2)-1] = mpoly[i]
         if i==1
             is = is+size(mpoly[i],2)
@@ -744,7 +799,7 @@ function find_poly_splits(bigpoly::Matrix)
     p1 = bigpoly[:,1]
     for i=1:size(bigpoly,2)
         if p1==bigpoly[:,i]
-            push!(splits,i)
+            push!(splits,i+1)
         end
     end
     splits
@@ -766,52 +821,6 @@ function split_poly(bigpoly::Matrix{T}, splits) where T
 end
 
 import Proj4
-# # Make RasterIO conditional as it is not Julia 0.6 compatible
-# if haskey(Pkg.installed(), "RasterIO")
-#     println("Enabling RasterIO function read_rasterio")
-#     eval(quote
-#         import RasterIO
-#         """
-#         read_rasterio(fn::AbstractString, T=Float32; NA=convert(T,NaN))
-
-#         Read various raster formats via the RasterIO.jl package.  Put output
-#         into a Gridded instance and the Proj4 projection string.
-#         """
-#         function read_rasterio(fn::AbstractString, T=Float32; NA=convert(T,NaN))
-#             ra = RasterIO.openraster(fn)
-#             nr = ra.height
-#             nc = ra.width
-#             #proj = RasterIO.getprojection(ra.dataset)
-#             proj4 = try # some computers may not have gdalsrsinfo installed
-#                 strip(readstring(`gdalsrsinfo -o proj4 $fn`), ['\n', '\'', ' '])
-#             catch
-#                 ""
-#             end
-#             va = convert(Matrix{T}, RasterIO.fetch(ra,1))
-#             # get the NoData value
-#             aa = Cint[0]
-#             nodata, success = getrasternodatavalue(RasterIO.getrasterband(ra.dataset,1))
-#             if success
-#                 for i in eachindex(va)
-#                     if va[i]==nodata
-#                         va[i] = NA
-#                     end
-#                 end
-#             end
-#             gt = RasterIO.geotransform(ra)
-#             origin = gt[[1,4]]
-#             xll,yll = RasterIO.applygeotransform(gt, 0.0, Float64(ra.height))
-#             pixelsz = gt[[2,6]]
-#             dx = pixelsz[1]
-#             dy = -pixelsz[2]
-#             @assert gt[[3,5]]==[0,0] "Can only handle North-up images"
-#             #Gridded(VAWTools.AGR(va', nc, nr, xll, yll, dx, nodata)), proj
-#             Gridded(range(xll+dx/2, step=dx, length=nc),
-#                     range(yll+dy/2, step=dy, length=nr),
-#                     true, flipdim(va,2)), proj4
-#         end
-#     end)
-# end
 
 ## Shapefiles
 import Shapefile, GeoInterface
@@ -951,7 +960,7 @@ function dist_longlat(lon1,lat1,lon2,lat2,R=6373) # the radius of the Earth
     lat1 = deg2rad(lat1)
     lat2 = deg2rad(lat2)
     a = (sin(dlat/2))^2 + cos(lat1) * cos(lat2) * (sin(dlon/2))^2
-    c = 2 * atan( sqrt(a), sqrt(1-a) )
+    c = 2 * atan2( sqrt(a), sqrt(1-a) )
     return R * c
 end
 
@@ -1078,11 +1087,12 @@ In:
 Out:
 - slope angle (rad)
 
-Note: slope and angle are very similar up to about ~0.4 or 20deg
+Note:
+- slope and angle are very similar up to about ~0.4 or 20deg
 """
-absslope(g::Gridded,weights::AbstractMatrix=UniformArray{Bool,2}(true),retnan=true) =
+absslope(g::Gridded, weights::AbstractMatrix=UniformArray{Bool,2}(true), retnan=true) =
     absslope(g.x,g.y,g.v,weights,retnan)
-function absslope(x::AbstractRange,y::AbstractRange,v,weights::AbstractMatrix=UniformArray{Bool,2}(true),retnan=true)
+function absslope(x::AbstractRange, y::AbstractRange, v, weights::AbstractMatrix=UniformArray{Bool,2}(true), retnan=true)
     dvx,dvy = gradient3by3(x,y,v,weights,retnan)
     for i in eachindex(dvx)
         dvx[i] = atan(sqrt(dvx[i]^2+dvy[i]^2))
@@ -1153,6 +1163,9 @@ Out:
 - dvx,dvy
 
 Reference: gradient3by3_fast
+
+Notes:
+- maybe this should be done using one of the Images.jl filters instead
 """
 gradient3by3(g::Gridded,weights::AbstractMatrix=UniformArray{Bool,2}(true),retnan=true) =
     gradient3by3(g.x,g.y,g.v,weights,retnan)
@@ -1167,7 +1180,7 @@ function gradient3by3(x::AbstractRange,y::AbstractRange,v,weights::AbstractMatri
     lw = zeros(Float64,3,3)
     f = [1,2,1]
     for j=1:ny, i=1:nx
-        lw[:] = 0
+        lw[:] .= 0
         for jj=max(1,j-1):min(ny,j+1), ii=max(1,i-1):min(nx,i+1)
             lw[ii-i+2,jj-j+2] = weights[ii,jj]
         end
@@ -1290,6 +1303,19 @@ function meannan(a)
     cum/n # == NaN if n==0
 end
 
+
+"Extrema ignoring NaNs"
+function extremanan(a)
+    mi,ma = zero(eltype(a)),zero(eltype(a))
+    @inbounds for i in eachindex(a)
+        if !isnan(a[i])
+            mi = min(mi, a[i])
+            ma = max(ma, a[i])
+        end
+    end
+    (mi,ma)
+end
+
 "Std ignoring NaNs"
 function stdnan(a)
     n = 0
@@ -1337,9 +1363,9 @@ function mean_weighted(a,w)
 end
 
 """
-    boxcar(A::AbstractArray, window, [, weights, dropmask])
-    boxcar(A::AbstractArray, windows::Tuple, [, weights, dropmask])
-    boxcar(A::AbstractArray, window::AbstractArray, [, weights, dropmask])
+    boxcar(A::AbstractArray, window, [, weights, keepmask])
+    boxcar(A::AbstractArray, windows::Tuple, [, weights, keepmask])
+    boxcar(A::AbstractArray, window::AbstractArray, [, weights, keepmask])
 
 Boxcar filter.  The two argument call skips NaNs.  The three & four
 argument call uses weights and propagates NaNs, it can be a lot faster.
@@ -1349,17 +1375,18 @@ The window can be specified as:
 - integer, for a symmetric window in all dimensions
 - a tuple to give lower and upper windows
 - a tuple of tuples to give different lower and upper windows for all dimensions
+- a array of size(A) for a different, symmetric window at each point.
 
-If desired, a different window can be specified for each point.  Then
-pass an array of same size as A as window.
+Weights, if given, will use those relative weights for averaging.  Note that
+points which have value==NaN and weight==0 will not poison the result.
 
-For the weights it may be faster to use non-Bool arrays nor BitArrays,
-say Int8.  Note that NaNs where weight==0 will not poison the result.
+No average is calculated for points where keepmask==true, instead
+their original value will be kept.
 
-No average is calculated for points where dropmask==true, instead
-their original value will be used.
-
-Also works for Vectors.
+Notes:
+- For the weights it may be faster to use non-Bool arrays nor BitArrays,
+  say Int8.  Note that NaNs where weight==0 will not poison the result.
+- Also works for Vectors.
 
 From http://julialang.org/blog/2016/02/iteration
 """
@@ -1374,7 +1401,8 @@ function boxcar(A::AbstractArray, windows::Tuple)
     for I in R # @inbounds does not help
         out[I] = NaN
         n, s = 0, zero(eltype(out))
-        for J in CartesianIndices(UnitRange.(max(I1, I-I1).I , min(Iend, I+I1).I) ) # used to be CartesianRange(max(I1, I-I_l), min(Iend, I+I_u) )
+        for J in CartesianIndices(UnitRange.(max(I1, I-I_l).I , min(Iend, I+I_u).I) ) # used to be
+        # for J in max(I1, I-I_l):min(Iend, I+I_u) ## in Julia 1.1
             if !isnan(A[J])
                 s += A[J]
                 n += 1
@@ -1433,7 +1461,7 @@ function boxcar(A::AbstractArray, windows::Tuple{<:AbstractArray, <:AbstractArra
         n, s = 0, zero(eltype(out))
         I_l = CartesianIndex(I1.I.*window_lower[I])
         I_u = CartesianIndex(I1.I.*window_upper[I])
-        for J in CartesianIndices(UnitRange.(max(I1, I-I1).I , min(Iend, I+I1).I) ) # used to be CartesianRange(max(I1, I-I_l), min(Iend, I+I_u) )
+        for J in CartesianIndices(UnitRange.(max(I1, I-I_l).I , min(Iend, I+I_u).I) ) # used to be CartesianRange(max(I1, I-I_l), min(Iend, I+I_u) )
             if !isnan(A[J])
                 s += A[J]
                 n += 1
@@ -1444,39 +1472,14 @@ function boxcar(A::AbstractArray, windows::Tuple{<:AbstractArray, <:AbstractArra
     out
 end
 
-# # this drops points which themselves have zero weight.
-# #function boxcar{T1,T2,T3,N}(A::AbstractArray{T1,N}, window::AbstractArray{T2,N}, weights::AbstractArray{T3,N}=UniformArray{T,N}(1))
-# function boxcar(A::AbstractArray, window, weights::AbstractArray)
-#     @assert size(weights)==size(A)
-#     out = zeros(A)
-#     # make an accumulator type closed under addition (needed for Bools):
-#     T = typeof(one(eltype(weights)) + one(eltype(weights)))
-#     R = CartesianIndices(size(A))
-#     I1, Iend = first(R), last(R)
-#     @inbounds @fastmath for I in R
-#         if weights[I]==0
-#             out[I] = 0
-#             continue
-#         end
-#         n, s = zero(T), zero(eltype(out))
-#         for J in CartesianIndices(max(I1, I-I1*window), min(Iend, I+I1*window))
-#             s += A[J]*weights[J]
-#             n += weights[J]
-#         end
-#         out[I] = s/n
-#     end
-#     out
-# end
-
-# this does not drop points which themselves have zero weight, only points on dropmask.
-boxcar(A::AbstractArray, window, weights::AbstractArray, dropmask::AbstractArray=(weights.==0)) =
-    boxcar(A, (window,window), weights, dropmask)
+boxcar(A::AbstractArray, window, weights::AbstractArray, keepmask::AbstractArray=(weights.==0)) =
+    boxcar(A, (window,window), weights, keepmask)
 function boxcar(A::AbstractArray{T,N}, windows::Tuple,
-                weights::AbstractArray,
-                dropmask::AbstractArray=(weights.==0)) where {T,N}
+                     weights::AbstractArray,
+                     keepmask::AbstractArray=(weights.==0)) where {T,N}
     @assert size(weights)==size(A)
     window_lower, window_upper = windows
-    out = fill(0.0, size(A))
+    out = fill(zero(T), size(A))
     # make an accumulator type closed under addition (needed for Bools):
     AT = typeof(one(eltype(weights)) + one(eltype(weights)))
     R = CartesianIndices(size(A))
@@ -1484,16 +1487,16 @@ function boxcar(A::AbstractArray{T,N}, windows::Tuple,
     I_l = CartesianIndex(I1.I.*window_lower)
     I_u = CartesianIndex(I1.I.*window_upper)
     @inbounds for I in R
-        if dropmask[I]
+        if keepmask[I]
             out[I] = A[I]
         else
             n, s = zero(AT), zero(T)
-            for J in CartesianIndices(UnitRange.(max(I1, I-I1).I , min(Iend, I+I1).I) ) # used to be CartesianRange(max(I1, I-I_l), min(Iend, I+I_u) )
+            for J in CartesianIndices(UnitRange.(max(I1, I-I_l).I , min(Iend, I+I_u).I) ) # used to be CartesianRange(max(I1, I-I_l), min(Iend, I+I_u) )
                 AJ, w = A[J], weights[J]
-                # if !isnan(AJ)
-                s += AJ * convert(T, w)
-                n += w
-                # end
+                if w!=0
+                    s += AJ * convert(T, w)
+                    n += w
+                end
             end
             if n==0
                 #error("At location $I no contributing cells found")
@@ -1508,24 +1511,23 @@ end
 
 
 """
-    boxcar_matrix(T::DataType, window::Integer, weights::AbstractMatrix[, dropmask])
+    boxcar_matrix(T::DataType, window::Integer, weights::AbstractMatrix[, keepmask])
 
 This produces a sparse matrix which can be used to apply the filter:
 `bx*hs2d`. Relatively expensive to create but very fast to apply, thus
 use when needing the same filter several times.
 
 Notes:
-- here NaNs where weight==0 do not poison the result.
-- therefore applying the matrix may not be 100% identical to just doing boxcar(...)
+- NaNs where weight==0 do not poison the result.
 
 Apply with
 
     apply_boxcar_matrix(M, orig)
 """
 function boxcar_matrix(::Type{T}, window::Integer,
-                       weights::AbstractArray{TT,N},
-                       dropmask::AbstractArray=(weights.==0)) where {T,TT,N}
-                               # dropmask::AbstractArray=BitArray{N}(ntuple(x->0, Val(N))...))
+                               weights::AbstractArray{TT,N},
+                               keepmask::AbstractArray=(weights.==0)) where {T,TT,N}
+                               # keepmask::AbstractArray=BitArray{N}(ntuple(x->0, Val{N})...))
     # make an accumulator type closed under addition (needed for Ints and Bools):
     Tacc = promote_type(T, eltype(weights))
     nr = size(weights,1)
@@ -1540,7 +1542,7 @@ function boxcar_matrix(::Type{T}, window::Integer,
     I1, Iend = first(R), last(R)
     @inbounds @fastmath for I in R
         i = (I.I[2]-1)*nr + I.I[1] # row of output matrix
-        if dropmask[I]
+        if keepmask[I]
             # do not average at this location, preserve original value
             push!(is, i)
             push!(js, i)
@@ -1562,7 +1564,7 @@ function boxcar_matrix(::Type{T}, window::Integer,
         end
         # divide the current batch by the summed weights:
         lvs = length(vs)
-        for n=lvs-(0:nrows-1)
+        for n=lvs .- (0:nrows-1)
             vs[n] /= acc
         end
     end
