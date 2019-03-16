@@ -1448,6 +1448,18 @@ function extremanan(a)
     (mi,ma)
 end
 
+"Maximunm ignoring NaNs"
+function maximumnan(a)
+    mi,ma = zero(eltype(a)),zero(eltype(a))
+    @inbounds for i in eachindex(a)
+        if !isnan(a[i])
+            ma = max(ma, a[i])
+        end
+    end
+    ma
+end
+
+
 "Std ignoring NaNs"
 function stdnan(a)
     n = 0
@@ -1788,11 +1800,18 @@ components `len`.  Returns a smoothed vector of the same length.
 
 Notes:
 - if len=0 no smoothing occurs
+- if length(x)==1 or ==2 no smoothing occurs
 - better than boxcar if having no edge-effects is important
 """
 function smooth_vector{T}(x, y::AbstractVector{T}, len, out=y)
     if len==0 && out==y
         return y
+    elseif length(y)==1 # no smoothing, horizontal line
+        return fill!(similar(y, length(out)), y)
+    elseif length(y)==2 # no smoothing, line
+        a = (y[2]-y[1])/(x[2]-x[1])
+        b = -a*x[2] + y[2]
+        return convert(Vector{T}, a.*out + b)
     else
         lambda0 = 0.001 # by trial and error
         lambda = convert(T, lambda0 * len^3) # the ^3 seems correct (trial and error)
