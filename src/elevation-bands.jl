@@ -452,9 +452,9 @@ function bandi_for_other_grid(bands, bandi, binmat::Matrix{Int}, g::Gridded,
 end
 
 
-##################
-# Extrapolation
-##################
+#####################
+# Extrapolation of IV
+#####################
 
 """
 To specify which edge of a cell is meant.  `_noedge` can be used if none
@@ -473,8 +473,8 @@ TODO:
 Arguably not the best datastructure for what is done below.
 """
 immutable Edge
-    i::Int # cell ind x-direction
-    j::Int # cell ind y-direction
+    i::Int # cell index (x-direction)
+    j::Int # cell index (y-direction)
     loc::Loc
 end
 const noedge = Edge(-1,-1,_noedge)
@@ -530,9 +530,12 @@ orientation(e1::Edge)::Orientation = lefthand
 
 
 """
-A line made up of a continuous (and sorted) collection of edges.
+A line made up of a continuous (and sorted) collection of edges.  Note
+that the edges themselves also have a cell associated with them.  So,
+a Line also a collection of (possibly repeated) cells.
 
-Also, the line has an orientation: the (i,j) cell lies on the "right" of the edge.
+The line has an orientation: when traversing the Line from 1 to n, all
+cells are on the right of their edge.
 """
 immutable Line
     edges::Vector{Edge}
@@ -594,6 +597,16 @@ function next_edge!(edges::Set{Edge}, edge::Edge, testori::Orientation)
     end
     # nothing found
     return noedge
+end
+
+"""
+    get_ux_uy(dem, mask)
+
+The direction and magnitude of steepest descent on each point within the mask.
+"""
+function get_ux_uy(dem, mask)
+    ux,uy = (-).(gradient3by3(dem, mask))
+    return ux, uy
 end
 
 """
@@ -726,29 +739,44 @@ function calc_boundaries(bands, bandi, binmat, landmask=nothing)
 end
 
 """
-    calc_fluxdir_source(l::Line, ux, uy, window, bands) -> fluxdir,ii,jj,fluxdirx,fluxdiry
+    calc_fluxdir(l::Line, ux, uy, window, dx, bands) -> flux,ii,jj,fluxdirx,fluxdiry
 
-Calculated the flux-direction on a Line by taking a running average
-over some part of it.  Also returns the flux to use and the upstream
+Calculated the flux-direction on a Line by taking a running average of (ux,uy)
+over some part of it of length window.  Also returns the flux to use and the upstream
 cell `(ii,jj)`.  The flux across the k-th edge is then given by:
 
-    fluxdir[k] * h[ii[k],jj[k]] * u[ii[k],jj[k]]
+    flux[k] * h[ii[k],jj[k]] * u[ii[k],jj[k]]
+
+where h is the thickness and u the depth averaged velocity.
 
 The flux across the line is
 
-    sum(fluxdir .* h_line .* u_line)
+    sum(flux .* h_line .* u_line)
+
+Input:
+- l::Line
+- ux,uy: unsmoothed velocity field (calculated as fall-line of surface DEM with get_ux_uy)
+- window : length of smoothing window (along band) in number of edges
+- dx : grid spacing
+- bands::Range : the elevation bands
+
+Output:
+- flux : the flux
+- ii, jj : indices of upstream cell
+- fluxdirx,fluxdiry : flux direction at upstream cell ii, jj
 
 Notes:
 - this is not 100% correct but probably close enough.
-  - now the averaging is over all edges.  Arguably it could be done over cells?
+- now the averaging is over all edges.  Arguably it could be done over cells?
 """
-function calc_fluxdir(l::Line, ux, uy, window, dx, bands)
+function calc_fluxdir(l::Line, ux, uy, window::Int, dx, bands)
     edges = l.edges
     ne = length(edges)
-    # x,y flux-direction on the cell
+    # flux in x and y-direction on the cell associated with a Line edge:
     fluxdirx = zeros(ne)
     fluxdiry = zeros(ne)
-    fluxdir = zeros(ne) # the flux which goes with the edge
+    # the flux which goes with the edge:
+    flux = zeros(ne)
     # indices of upstream cell
     ii = zeros(Int,ne)
     jj = zeros(Int,ne)
@@ -782,7 +810,7 @@ function calc_fluxdir(l::Line, ux, uy, window, dx, bands)
         fluxdiry[I] = fy
         # figure out upstream cell
         i,j,loc = edges[I].i, edges[I].j, edges[I].loc
-        ii[I],jj[I],fluxdir[I] =
+        ii[I],jj[I],flux[I] =
             if loc==left
                 fx<0 ? (i,j,fx*dx) : (i-1,j,fx*dx)
             elseif loc==right
@@ -796,7 +824,7 @@ function calc_fluxdir(l::Line, ux, uy, window, dx, bands)
     # for reverse ordered bands, need a sign flip
     sig = sign(bands[2]-bands[1])
 
-    return sig*fluxdir,ii,jj,fluxdirx,fluxdiry
+    return sig*flux,ii,jj,fluxdirx,fluxdiry
 end
 
 """
@@ -815,9 +843,9 @@ bands is calculated with `calc_fluxdir`.
 Input:
 - q1d: 1d flux (m/a) on elevation bands
 - boundaries: from calc_boundaries
-- u_trial: velocity
+- u_trial: 2D velocity field which has the right shape (say cross-valley) but not the right magnitude
 - thick: ice thickness
-- ux,uy: velocity direction (calculated as fall-line of surface DEM)
+- ux,uy: unsmoothed velocity field (calculated as fall-line of surface DEM with get_ux_uy)
 - dx: grid size
 - mask: true where glacier is
 - lengths: length of each elevation band
@@ -936,7 +964,7 @@ Precalculate the boxcar operator for the IV calculation (this is the
 most expensive part).
 """
 function get_iv_boxcar_M(F, dem, mask, bands, bandi, lengths, iv_window_frac)
-    ux,uy = (-).(gradient3by3(dem, mask))
+    ux,uy = get_ux_uy(dem, mask)
     binmat = bins2matrix(dem, bands, bandi)
     boundaries = calc_boundaries(bands,bandi,binmat)
     q1d = ones(bands)
