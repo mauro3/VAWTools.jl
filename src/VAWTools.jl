@@ -233,6 +233,144 @@ haserror(g::Traj) = length(g.err)!=0
 hasproj(g::Traj) = g.proj!=""
 length(g::Traj) = length(g.x)
 
+function distances(t::Traj)
+    dist = zeros(length(t)-1)
+    @inbounds for i=1:length(dist)
+        dist[i] = sqrt( (t.x[i+1]-t.x[i])^2 + (t.y[i+1]-t.y[i])^2)
+    end
+    dist
+end
+
+
+"""
+    downsample(t::Traj{T}, window::Float64, average=true) where T
+    downsample(t::Traj{T}, step::Int)
+
+Downsample a
+"""
+function downsample(t::Traj, step::Int)
+    @assert length(t.splits)==
+    return Traj(t.x[1:step:end], t.y[1:step:end], t.v[1:step:end], t.err[1:step:end], [1:length(t.err[1:step:end])], t.proj)
+end
+function downsample(t::Traj{T}, window::Float64, average=true) where T
+    dist = distances(t)
+    x, y = Float64[], Float64[]
+    v = T[]
+    err = T[]
+    splits = similar(t.splits, 0)
+    ttt = time()
+    for s in t.splits
+        i = s[1]
+        s1 = length(x)+1
+        while i<s[end]
+            ##
+            d = 0.0
+            n = 1
+            val = t.v[i]
+            eval = t.err[i]
+            if average
+                # before point
+                for j=i-1:-1:s[1]
+                    d += dist[j]
+                    if d<window/2
+                        n += 1
+                        val += t.v[j]
+                        eval += t.err[j]
+                    else
+                        break
+                    end
+                end
+                # after point
+                d = 0.0
+                for j=i+1:s[end]
+                    d += dist[j-1]
+                    if d<window/2
+                        n += 1
+                        val += t.v[j]
+                        eval += t.err[j]
+                    else
+                        break
+                    end
+                end
+            end
+            push!(x, t.x[i])
+            push!(y, t.y[i])
+            push!(v, val/n)
+            push!(err, eval/n)
+
+            ## Find next i
+            d = 0.0
+            for j=i+1:s[end] # returns also s[end]
+                d += dist[j-1]
+                if d>=window/2 || j==s[end]
+                    i = j
+                    break
+                end
+            end
+        end
+        push!(splits, s1:length(x))
+    end
+    return Traj(x, y, v, err, splits, t.proj)
+end
+
+
+function mindistance(point, x, y, inds=1:length(x))
+    dist = Inf
+    ind = 0
+    @inbounds for i=inds
+        d = (x[i]-point[1])^2 + (y[i]-point[2])^2
+        if d<dist
+            dist = d
+            ind = i
+        end
+    end
+    sqrt(dist), ind
+end
+
+
+"""
+     sort_traj(tr)
+
+Brute force sorting of a trajectory.  Ignores splits.
+"""
+function sort_traj(tr)
+    x,y = tr.x, tr.y
+    inds = collect(1:length(tr))
+    todo = trues(inds)
+    out = Int[]
+    j = findmin(tr.x)[2]
+    push!(out, j)
+    todo[out[1]] = false
+
+    @inbounds for i=2:length(tr)
+        j = mindistance((tr.x[j], tr.y[j]), x, y, inds[todo])[2]
+        push!(out, j)
+        todo[j] = false
+    end
+    return Traj(tr.x[out], tr.y[out], tr.v[out], tr.err[out], [1:length(tr)], tr.proj)
+end
+
+"""
+    issorted_traj(tr, inds=1:min(length(tr), 500))
+
+Checks whether a trajectory is sorted.  Only checks inds.
+"""
+function issorted_traj(tr, inds=1:min(length(tr), 500))
+    x,y = tr.x[inds], tr.y[inds]
+    todo = trues(inds)
+    out = Int[]
+    j = findmin(tr.x[inds])[2]
+    push!(out, j)
+    todo[out[1]] = false
+
+    @inbounds for i=inds[2:end]
+        j = mindistance((tr.x[j], tr.y[j]), x, y, inds[todo])[2]
+        push!(out, j)
+        todo[j] = false
+    end
+    return Base.issorted(out)
+end
+
 """
     split_traj!{T<:Traj}(t::T, dist)
 

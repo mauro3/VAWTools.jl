@@ -195,6 +195,7 @@ tr = Traj(1.0:5, 6.0:10, 1.0:5.0, 1.0:5.0, [1:3,4:5])
 @test tr.splits==[1:3,4:5]
 @test VAWTools.haserror(tr)
 @test VAWTools.hasvalues(tr)
+@test all(VAWTools.distances(tr).==sqrt(2))
 
 # split it
 tr = Traj([1,2,4,5], 1:4)
