@@ -231,6 +231,144 @@ haserror(g::Traj) = length(g.err)!=0
 hasproj(g::Traj) = g.proj!=""
 length(g::Traj) = length(g.x)
 
+function distances(t::Traj)
+    dist = zeros(length(t)-1)
+    @inbounds for i=1:length(dist)
+        dist[i] = sqrt( (t.x[i+1]-t.x[i])^2 + (t.y[i+1]-t.y[i])^2)
+    end
+    dist
+end
+
+
+"""
+    downsample(t::Traj{T}, window::Float64, average=true) where T
+    downsample(t::Traj{T}, step::Int)
+
+Downsample a
+"""
+function downsample(t::Traj, step::Int)
+    @assert length(t.splits)==
+    return Traj(t.x[1:step:end], t.y[1:step:end], t.v[1:step:end], t.err[1:step:end], [1:length(t.err[1:step:end])], t.proj)
+end
+function downsample(t::Traj{T}, window::Float64, average=true) where T
+    dist = distances(t)
+    x, y = Float64[], Float64[]
+    v = T[]
+    err = T[]
+    splits = similar(t.splits, 0)
+    ttt = time()
+    for s in t.splits
+        i = s[1]
+        s1 = length(x)+1
+        while i<s[end]
+            ##
+            d = 0.0
+            n = 1
+            val = t.v[i]
+            eval = t.err[i]
+            if average
+                # before point
+                for j=i-1:-1:s[1]
+                    d += dist[j]
+                    if d<window/2
+                        n += 1
+                        val += t.v[j]
+                        eval += t.err[j]
+                    else
+                        break
+                    end
+                end
+                # after point
+                d = 0.0
+                for j=i+1:s[end]
+                    d += dist[j-1]
+                    if d<window/2
+                        n += 1
+                        val += t.v[j]
+                        eval += t.err[j]
+                    else
+                        break
+                    end
+                end
+            end
+            push!(x, t.x[i])
+            push!(y, t.y[i])
+            push!(v, val/n)
+            push!(err, eval/n)
+
+            ## Find next i
+            d = 0.0
+            for j=i+1:s[end] # returns also s[end]
+                d += dist[j-1]
+                if d>=window/2 || j==s[end]
+                    i = j
+                    break
+                end
+            end
+        end
+        push!(splits, s1:length(x))
+    end
+    return Traj(x, y, v, err, splits, t.proj)
+end
+
+
+function mindistance(point, x, y, inds=1:length(x))
+    dist = Inf
+    ind = 0
+    @inbounds for i=inds
+        d = (x[i]-point[1])^2 + (y[i]-point[2])^2
+        if d<dist
+            dist = d
+            ind = i
+        end
+    end
+    sqrt(dist), ind
+end
+
+
+"""
+     sort_traj(tr)
+
+Brute force sorting of a trajectory.  Ignores splits.
+"""
+function sort_traj(tr)
+    x,y = tr.x, tr.y
+    inds = collect(1:length(tr))
+    todo = trues(inds)
+    out = Int[]
+    j = findmin(tr.x)[2]
+    push!(out, j)
+    todo[out[1]] = false
+
+    @inbounds for i=2:length(tr)
+        j = mindistance((tr.x[j], tr.y[j]), x, y, inds[todo])[2]
+        push!(out, j)
+        todo[j] = false
+    end
+    return Traj(tr.x[out], tr.y[out], tr.v[out], tr.err[out], [1:length(tr)], tr.proj)
+end
+
+"""
+    issorted_traj(tr, inds=1:min(length(tr), 500))
+
+Checks whether a trajectory is sorted.  Only checks inds.
+"""
+function issorted_traj(tr, inds=1:min(length(tr), 500))
+    x,y = tr.x[inds], tr.y[inds]
+    todo = trues(inds)
+    out = Int[]
+    j = findmin(tr.x[inds])[2]
+    push!(out, j)
+    todo[out[1]] = false
+
+    @inbounds for i=inds[2:end]
+        j = mindistance((tr.x[j], tr.y[j]), x, y, inds[todo])[2]
+        push!(out, j)
+        todo[j] = false
+    end
+    return Base.issorted(out)
+end
+
 """
     split_traj!{T<:Traj}(t::T, dist)
 
@@ -822,6 +960,138 @@ end
 
 import Proj4
 
+import ArchGDAL
+"""
+    read_geotiff(fn::AbstractString, T=Float32; bandnr=1, NA=convert(T,NaN))
+
+Reads a geotiff raster and put output
+into a Gridded instance (including the Proj4 projection string).
+
+Link: https://github.com/yeesian/ArchGDAL.jl/issues/68
+"""
+function read_geotiff(filepath::AbstractString, T=Float32; bandnr=1, NA=convert(T,NaN))
+    AG = ArchGDAL
+    out = AG.registerdrivers() do
+        AG.read(filepath) do dataset
+            band = AG.getband(dataset, bandnr)
+            w, h = AG.width(band), AG.height(band)
+            # scale, off = AG.getscale(band), AG.getoffset(band)
+            na = AG.getnodatavalue(band)
+            mat = convert(Matrix{T}, AG.read(band))
+            mat[mat.==na] = NA
+            gt = AG.getgeotransform(dataset)
+            dx, dy = gt[2], -gt[end]
+            x0 = gt[1] + dx/2
+            x1 = x0 + (w-1) * dx
+            y1 = gt[4] - dy/2
+            y0 = y1 - (h-1)*dy
+
+            proj4 = strip(AG.toPROJ4(AG.importWKT(AG.getproj(dataset))))
+            Gridded(x0:dx:x1, y0:dy:y1, mat[:,end:-1:1], Matrix{T}(0,0), true, proj4)
+        end
+    end
+end
+
+"""
+    write_geotiff(g::Vector{Gridded{T}}, filepath::AbstractString;
+                       size_=size(g[1]), # if the geotiff size is different to gridded size
+                       xinds = 1:length(g[1].x), # to place it
+                       yinds = 1:length(g[1].y), #
+                       nodataval=[NaN, -3.697314e28][1] # https://maurow.bitbucket.io/notes/packbits-geotiffs.html
+                       ) where T
+
+Write a vector of Gridded into the bands of a geotiff.
+"""
+function write_geotiff(g::Vector{Gridded{T}}, filepath::AbstractString;
+                       size_=size(g[1]), # if the geotiff size is different to gridded size
+                       xinds = 1:length(g[1].x), # to place it
+                       yinds = 1:length(g[1].y), #
+                       nodataval=[NaN, -3.697314e28][1], # https://maurow.bitbucket.io/notes/packbits-geotiffs.html
+                       colornames=["gray", ["undefined" for i=2:length(g)]...]) where T
+    dx = step(g[1].x)
+    dy = step(g[1].y)
+    AG = ArchGDAL
+    AG.registerdrivers() do
+        AG.create(
+            filepath,
+            AG.getdriver("GTiff"),
+            width = size_[1],
+            height = size_[2],
+            nbands = length(g),
+            dtype = T
+        ) do raster
+            AG.setproj!(raster, AG.toWKT( AG.importPROJ4(g[1].proj)))
+            # https://www.gdal.org/gdal_datamodel.html
+            top = g[1].y[end] + dy/2
+            left = g[1].x[1] - dx/2
+            AG.setgeotransform!(raster, [left, dx, 0, top, 0, -dy])
+            for (i,gg) in enumerate(g)
+                @assert gg.x==g[1].x
+                @assert gg.y==g[1].y
+                AG.write!(
+                    raster,
+                    gg.v[:,end:-1:1],
+                    i, # update band i
+                    yinds, # along (window) xcoords
+                    xinds # along (window) ycoords
+                )
+                AG.setnodatavalue!(AG.getband(raster,i), nodataval)
+                # AG.setname!(AG.getband(raster,i), colornames[i])  # does not work
+            end
+        end
+    end
+    nothing
+end
+
+"""
+Use gdal_merge.py
+
+https://github.com/yeesian/ArchGDAL.jl/issues/39
+"""
+function update_geotiff(g::Gridded{T}, filepath::AbstractString) where T
+    error("not implemented")
+
+    AG = ArchGDAL
+    # figure out extent
+    w, h, na, gt, proj4 = AG.registerdrivers() do
+        AG.read(filepath) do dataset
+            band = AG.getband(dataset, 1)
+            w, h = AG.width(band), AG.height(band)
+            na = AG.getnodatavalue(band)
+            gt = AG.getgeotransform(dataset)
+            proj4 = strip(AG.toPROJ4(AG.importWKT(AG.getproj(dataset))))
+            (w, h, na, gt, proj4)
+        end
+    end
+
+
+
+    AG.registerdrivers() do
+        AG.update(filepath) do raster
+            AG.write!(
+                raster,
+                g.v[:,end:-1:1],
+                1, # update band 1
+                xcoords, # along (window) xcoords
+                ycoords # along (window) ycoords
+            )
+        end
+    end
+    nothing
+end
+
+function compress_geotiff(fl, method=PACKBITS)
+    AG = ArchGDAL
+    fl1 = splitext(fl)[1]*"-comp.tif"
+    nodata = AG.registerdrivers() do
+        AG.read(fl) do dataset
+            band = AG.getband(dataset, 1)
+            AG.getnodatavalue(band)
+        end
+    end
+    run(`gdalwarp -overwrite -srcnodata $nodata -dstnodata -3.697314e28  -ot float32 -co COMPRESS=$method $fl $fl1`)
+end
+
 ## Shapefiles
 import Shapefile, GeoInterface
 
@@ -1316,6 +1586,18 @@ function extremanan(a)
     (mi,ma)
 end
 
+"Maximunm ignoring NaNs"
+function maximumnan(a)
+    mi,ma = zero(eltype(a)),zero(eltype(a))
+    @inbounds for i in eachindex(a)
+        if !isnan(a[i])
+            ma = max(ma, a[i])
+        end
+    end
+    ma
+end
+
+
 "Std ignoring NaNs"
 function stdnan(a)
     n = 0
@@ -1657,11 +1939,18 @@ components `len`.  Returns a smoothed vector of the same length.
 
 Notes:
 - if len=0 no smoothing occurs
+- if length(x)==1 or ==2 no smoothing occurs
 - better than boxcar if having no edge-effects is important
 """
 function smooth_vector(x, y::AbstractVector{T}, len, out=y) where T
     if len==0 && out==y
         return y
+    elseif length(y)==1 # no smoothing, horizontal line
+        return fill!(similar(y, length(out)), y)
+    elseif length(y)==2 # no smoothing, line
+        a = (y[2]-y[1])/(x[2]-x[1])
+        b = -a*x[2] + y[2]
+        return convert(Vector{T}, a.*out + b)
     else
         lambda0 = 0.001 # by trial and error
         lambda = convert(T, lambda0 * len^3) # the ^3 seems correct (trial and error)

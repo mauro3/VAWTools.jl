@@ -6,6 +6,7 @@
 
 export map_onto_bands, make_1Dglacier, map_back_to_2D, map_back_to_2D!
 
+# used to round (up or down) the binsize to the next decimal place
 _binround(binsize::Number) = -floor(Int, log10(abs(binsize)))
 _binround(binsize) = 0
 
@@ -29,21 +30,24 @@ Returns:
 """
 function make_1Dglacier(dem::Gridded, binsize_or_bins, glaciermask=trues(size(dem.v));
                         binround=_binround(binsize_or_bins),
+                        min_bin_number_ends=0,
+                        min_bands=4,
                         window_dem_smooth=0.0,
                         window_width_smooth=0.0,
                         alpha_min=deg2rad(0.4),
                         alpha_max=deg2rad(60.0),
-                        FILL=-9999999.0)
+                        FILL=-9999999.0,
+                        verbose=true)
     dx = step(dem.x)
     # Smooth dem to get smooth alpha, smoother bands.  This is in
     # particular important when there is cross-flow bumpiness, such as
     # on Uaar.  However, it can also be bad.  YMMV, check!
     if window_dem_smooth>0
         dem = deepcopy(dem)
-        fillmask = dem.v.!=FILL
-        mask = fillmask .& glaciermask
+        nofillmask = dem.v.!=FILL
+        mask = nofillmask .& glaciermask
         dem.v[:] = boxcar(dem.v, round(Int,window_dem_smooth/dx), mask, (!).(mask))
-        dem.v[(!).(fillmask)] = FILL
+        dem.v[(!).(nofillmask)] = FILL
     end
     # no FILL inside glaciermask
     @assert !any(dem.v[glaciermask].==FILL)
@@ -53,7 +57,10 @@ function make_1Dglacier(dem::Gridded, binsize_or_bins, glaciermask=trues(size(de
     ret_nans = false
     alpha2d = absslope(dem, glaciermask, ret_nans)
 
-    bands, bandi = bin_grid(dem, binsize_or_bins, glaciermask, binround=binround)
+    bands, bandi = bin_grid(dem, binsize_or_bins, glaciermask,
+                            binround=binround, min_bin_number_ends=min_bin_number_ends,
+                            min_bands=min_bands)
+    @assert length(bands)>=min_bands "Need at least $min_bands elevation bins, only got $(length(bands))"
 
     nb = length(bands)
     cellsz = step(dem.x)^2
@@ -100,7 +107,8 @@ function make_1Dglacier(dem::Gridded, binsize_or_bins, glaciermask=trues(size(de
     if window_width_smooth>0
         widths = boxcar(widths, round(Int, window_width_smooth/mean(dzs) ))
         for i=1:nb
-            lengths[i] = areas[i]/widths[i]
+            # make sure length is zero when area is zero
+            lengths[i] = areas[i]==widths[i]==0 ? zero(lengths[i]) : areas[i]/widths[i]
             malphas[i] = atan(dzs[i]/lengths[i])
             @assert malphas[i]>=0
         end
@@ -110,16 +118,16 @@ function make_1Dglacier(dem::Gridded, binsize_or_bins, glaciermask=trues(size(de
     xmid = x[1:end-1] + diff(x)/2
 
     # tests
-    if abs(totalarea-sum(areas))>1.0
-        error("Something's amiss, sum of area of bands $(sum(areas)) not equal total area $totalarea,")
-    end
+    # if abs(totalarea-sum(areas))>1.0
+    #     error("Something's amiss, sum of area of bands $(sum(areas)) not equal total area $totalarea,")
+    # end
     # check band length against diagonal
-    tmp = sum(glaciermask, dims=2)[:]
-    xextent = (findlast(tmp.>0)-findfirst(tmp.>0)).*dx
-    tmp = sum(glaciermask, dims=1)[:]
-    yextent = (findlast(tmp.>0)-findfirst(tmp.>0)).*dx
+    tmp = sum(glaciermask,2)
+    xextent = (findlast(tmp.>0)-findfirst(tmp.>0))*dx
+    tmp = sum(glaciermask,1)
+    yextent = (findlast(tmp.>0)-findfirst(tmp.>0))*dx
     box_diag = sqrt(xextent^2 + yextent^2)
-    if abs(sum(lengths)-box_diag)/box_diag>0.4
+    if verbose && abs(sum(lengths)-box_diag)/box_diag>0.4
         warn("Glacier length from might be wrong. Band-length: $(sum(lengths)/1e3)km, bounding-box diag: $(box_diag/1e3)km")
     end
 
@@ -157,7 +165,7 @@ function band_slope!(alphas, bandnr, alpha_min, alpha_max)
     end
     # magic slope calculation
     sort!(alphas)
-    # calculate indices of 5th, 20th and 80th quantiles:
+    # calculate indices of 5th, 20th and 80th percentiles:
     iq5  = max(1,round(Int,n*f_q5))
     iq20 = max(1,round(Int,n*f_q20))
     iq80 = min(n,round(Int,n*f_q80))
@@ -187,59 +195,103 @@ Bins a gird into bands.  Often used to bin a DEM into elevation bands.
 
 KW:
 - binround -- floor the bin-start using this many digits (see help of floor)
+- min_bin_number_ends -- minimum number of elements in the uppermost and lowermost
+                         band.  If below, merge those cells into the first viable band.
+- min_bands -- minimum number of bands produced (3).  Not integrated with min_bin_number_ends!
 
 Return:
 - bands -- a range of the bands, e.g. 0.0:10.0:100.0
 - bandi -- a Vector{Vector{Int}} of length(bands) with each element
            containing the indices of cells in the band
 """
-bin_grid(g::Gridded, binsize_or_bins, mask=BitArray([]); binround=_binround(binsize_or_bins)) =
-    bin_grid(g.v, binsize_or_bins, mask; binround=binround)
-function bin_grid(v::Matrix, binsize_or_bins, mask=BitArray([]); binround=_binround(binsize_or_bins))
+function bin_grid(g::Gridded, binsize_or_bins, mask=BitArray([]);
+                  binround=_binround(binsize_or_bins), min_bin_number_ends=0, min_bands=4)
+    bin_grid(g.v, binsize_or_bins, mask;
+             binround=binround, min_bin_number_ends=min_bin_number_ends,
+             min_bands=min_bands)
+end
+function bin_grid(v::Matrix, binsize::Number, mask=BitArray([]);
+                  binround=_binround(binsize), min_bin_number_ends=0, min_bands=4)/
     if isempty(mask)
         v = v
         ginds = 1:length(v)
     else
         @assert size(mask)==size(v)
         v = v[mask]
-        ginds = findall(mask[:])
+        ginds = find(mask[:])
     end
     nv = length(v)
-    if isa(binsize_or_bins, Number) # i.e. a binsize
+    bins = 1.0:-1
+    while length(bins)<=min_bands
         mi, ma = minimum(v), maximum(v)
-        if binsize_or_bins>=0
-            binstart = floor(mi, digits=binround)
-            binend = floor(ma, digits=binround) # better: `ceil(ma, binround) - binsize_or_bins` ?
+        if binsize>=0
+            binstart = floor(mi, binround)
+            binend = floor(ma, binround) # better: `ceil(ma, binround) - binsize` ?
         else
-            binstart = ceil(ma, digits=binround)
-            binend = ceil(mi, digits=binround) # better: `ceil(ma, binround) - binsize_or_bins` ?
+            binstart = ceil(ma, binround)
+            binend = ceil(mi, binround) # better: `ceil(ma, binround) - binsize` ?
         end
         @assert !isnan(binstart) && !isnan(binend)
-        bins = binstart:binsize_or_bins:binend # these are the start of the bins
-    else
-        bins = binsize_or_bins
+        bins = binstart:binsize:binend # these are the start of the bins
+
+        # decreas binsize for next round
+        binsize = step(bins)/2
     end
-    _bin_grid_kernel(bins, nv, v, ginds)
+    return _bin_grid_kernel(bins, nv, v, ginds, min_bin_number_ends)
 end
-@inbounds function _bin_grid_kernel(bins, nv, v, ginds)
+function bin_grid(v::Matrix, bins::Range, mask=BitArray([]); min_bin_number_ends=0, kw...)
+    if isempty(mask)
+        v = v
+        ginds = 1:length(v)
+    else
+        @assert size(mask)==size(v)
+        v = v[mask]
+        ginds = find(mask[:])
+    end
+    nv = length(v)
+    _bin_grid_kernel(bins, nv, v, ginds, min_bin_number_ends)
+end
+
+@inbounds function _bin_grid_kernel(bins, nv, v, ginds, min_bin_number_ends)
     # initialize output
-    indices = Vector{Int}[]
+    bandi = Vector{Int}[]
     for b in bins
         ind = Int[]
-        push!(indices, ind)
+        push!(bandi, ind)
     end
     # fill it
     for j=1:nv
-        if (bins[2]-bins[1])>0
+        if step(bins)>0
             i = searchsortedlast(bins, v[j])
             i = i==0 ? 1 : i # if smaller then add to lowest bin
         else
             # https://github.com/JuliaLang/julia/issues/18653
             i = searchsortedlast(collect(bins), v[j], rev=true)
+            i = i==0 ? 1 : i # if smaller then add to highest bin (i.e. bins[1])
         end
-        push!(indices[i], ginds[j])
+        push!(bandi[i], ginds[j])
     end
-    return bins, indices
+    # remove top and bottom bins if too few elements
+    inds2pop = [1,length(bandi)] # remove up to and including these bandi
+    num = [0,0]
+    for i = 1:length(bandi)
+        inds2pop[1] = i
+        if length(bandi[i])+num[1]>=min_bin_number_ends
+            break
+        end
+        num[1] +=length(bandi[i])
+    end
+    for i = length(bandi):-1:1
+        inds2pop[2] = i
+        if length(bandi[i])+num[2]>=min_bin_number_ends
+            break
+        end
+        num[2] +=length(bandi[i])
+    end
+    # add the dropped cells to the next/previous band
+    append!(bandi[inds2pop[1]], vcat(bandi[1:inds2pop[1]-1]...))
+    append!(bandi[inds2pop[2]], vcat(bandi[inds2pop[2]+1:end]...))
+    return bins[inds2pop[1]:inds2pop[2]], bandi[inds2pop[1]:inds2pop[2]]
 end
 
 
@@ -264,18 +316,18 @@ function bin_traj(tr::Traj, g::Gridded, binsize_or_bins, mask=trues(size(g.v)); 
     v = [demi[x,y] for (x,y) in zip(tr.x,tr.y)]
     vm = Bool[maski[x,y] for (x,y) in zip(tr.x,tr.y)]
     v = v[vm]
-    ginds = findall(vm)
+    ginds = find(vm)
     nv = length(v)
 
     if isa(binsize_or_bins, Number)
         mi, ma = minimum(v), maximum(v)
-        binstart = floor(mi, digits=binround)
-        binend = floor(ma, digits=binround)
+        binstart = floor(mi, binround)
+        binend = floor(ma, binround)
         bins = binstart:binsize_or_bins:binend # these are the start of the bins
     else
         bins = binsize_or_bins
     end
-    _bin_grid_kernel(bins, nv, v, ginds)
+    _bin_grid_kernel(bins, nv, v, ginds, 0)
 end
 
 """
@@ -355,12 +407,12 @@ end
 
 
 """
-    bandi_for_other_grid(bands, bandi, binmat, g::Gridded,
+    bandi_for_other_grid(bands, bandi, g::Gridded,
                          othergrid::Gridded, othermask=trues(size(othergrid.v))
     bandi_for_other_grid(bands, bandi, g::Gridded,
                          othergrid::Gridded, othermask=trues(size(othergrid.v)))
 
-Returns vector of indices (bandi) to map a different grid onto the
+Returns vector of indices (bandi) to map a different grid (othergird) onto the
 bands encoded in `binmat` (or `bands, bandi`) and grid `g`.  It only
 maps points onto bands which are within the mask applied to generate
 the bands.  Additionally & optionally, a mask for the othergrid can
@@ -400,9 +452,9 @@ function bandi_for_other_grid(bands, bandi, binmat::Matrix{Int}, g::Gridded,
 end
 
 
-##################
-# Extrapolation
-##################
+#####################
+# Extrapolation of IV
+#####################
 
 """
 To specify which edge of a cell is meant.  `_noedge` can be used if none
@@ -414,7 +466,8 @@ is used.
 @enum Orientation nohand=0 lefthand=1 righthand=2
 
 """
-One cell-edge of a regular gird of cells.
+One cell-edge of a regular gird of cells.  Specified as a cell
+and which edge of the four edges of a cell.
 
 TODO:
 Arguably not the best datastructure for what is done below.
@@ -477,9 +530,12 @@ orientation(e1::Edge)::Orientation = lefthand
 
 
 """
-A line made up of a continuous (and sorted) collection of edges.
+A line made up of a continuous (and sorted) collection of edges.  Note
+that the edges themselves also have a cell associated with them.  So,
+a Line also a collection of (possibly repeated) cells.
 
-Also, the line has an orientation: the (i,j) cell lies on the "right" of the edge.
+The line has an orientation: when traversing the Line from 1 to n, all
+cells are on the right of their edge.
 """
 struct Line
     edges::Vector{Edge}
@@ -541,6 +597,16 @@ function next_edge!(edges::Set{Edge}, edge::Edge, testori::Orientation)
     end
     # nothing found
     return noedge
+end
+
+"""
+    get_ux_uy(dem, mask)
+
+The direction and magnitude of steepest descent on each point within the mask.
+"""
+function get_ux_uy(dem, mask)
+    ux,uy = (-).(gradient3by3(dem, mask))
+    return ux, uy
 end
 
 """
@@ -675,29 +741,44 @@ function calc_boundaries(bands, bandi, binmat, landmask=nothing)
 end
 
 """
-    calc_fluxdir_source(l::Line, ux, uy, window, bands) -> fluxdir,ii,jj,fluxdirx,fluxdiry
+    calc_fluxdir(l::Line, ux, uy, window, dx, bands) -> flux,ii,jj,fluxdirx,fluxdiry
 
-Calculated the flux-direction on a Line by taking a running average
-over some part of it.  Also returns the flux to use and the upstream
+Calculated the flux-direction on a Line by taking a running average of (ux,uy)
+over some part of it of length window.  Also returns the flux to use and the upstream
 cell `(ii,jj)`.  The flux across the k-th edge is then given by:
 
-    fluxdir[k] * h[ii[k],jj[k]] * u[ii[k],jj[k]]
+    flux[k] * h[ii[k],jj[k]] * u[ii[k],jj[k]]
+
+where h is the thickness and u the depth averaged velocity.
 
 The flux across the line is
 
-    sum(fluxdir .* h_line .* u_line)
+    sum(flux .* h_line .* u_line)
+
+Input:
+- l::Line
+- ux,uy: unsmoothed velocity field (calculated as fall-line of surface DEM with get_ux_uy)
+- window : length of smoothing window (along band) in number of edges
+- dx : grid spacing
+- bands::Range : the elevation bands
+
+Output:
+- flux : the flux
+- ii, jj : indices of upstream cell
+- fluxdirx,fluxdiry : flux direction at upstream cell ii, jj
 
 Notes:
 - this is not 100% correct but probably close enough.
-  - now the averaging is over all edges.  Arguably it could be done over cells?
+- now the averaging is over all edges.  Arguably it could be done over cells?
 """
-function calc_fluxdir(l::Line, ux, uy, window, dx, bands)
+function calc_fluxdir(l::Line, ux, uy, window::Int, dx, bands)
     edges = l.edges
     ne = length(edges)
-    # x,y flux-direction on the cell
+    # flux in x and y-direction on the cell associated with a Line edge:
     fluxdirx = zeros(ne)
     fluxdiry = zeros(ne)
-    fluxdir = zeros(ne) # the flux which goes with the edge
+    # the flux which goes with the edge:
+    flux = zeros(ne)
     # indices of upstream cell
     ii = zeros(Int,ne)
     jj = zeros(Int,ne)
@@ -731,7 +812,7 @@ function calc_fluxdir(l::Line, ux, uy, window, dx, bands)
         fluxdiry[I] = fy
         # figure out upstream cell
         i,j,loc = edges[I].i, edges[I].j, edges[I].loc
-        ii[I],jj[I],fluxdir[I] =
+        ii[I],jj[I],flux[I] =
             if loc==left
                 fx<0 ? (i,j,fx*dx) : (i-1,j,fx*dx)
             elseif loc==right
@@ -745,66 +826,89 @@ function calc_fluxdir(l::Line, ux, uy, window, dx, bands)
     # for reverse ordered bands, need a sign flip
     sig = sign(bands[2]-bands[1])
 
-    return sig*fluxdir,ii,jj,fluxdirx,fluxdiry
+    return sig*flux,ii,jj,fluxdirx,fluxdiry
 end
 
 """
-    calc_u(q1d, boundaries, thick, alpha, ux, uy, dx, mask, bands, lengths,
-           flux_dir_window, window_frac=1.5,
-           x=nothing, y=nothing) # these are only needed for plotting
-    -> u2d, u2d_at_bands, scaling_factors_1d, mask_u2d_at_bands
+    calc_u(q1d, boundaries, u_trial, thick,
+                ux, uy, dx, mask, bands, bandi, lengths,
+                flux_dir_window, # in [m]
+                boxcarM::AbstractMatrix or window_frac,
+                scale_u=ones(q1d);
+                plotyes=false,
+                x=nothing, y=nothing)
 
 Calculates a 2D field of depth averaged ice flow speed `ubar` which has the
 same flux across elevation band boundaries as the supplied 1D flux
 `q1d`.  Only `q1d` is a flow-band variable.  The flux across elevation
 bands is calculated with `calc_fluxdir`.
 
-Note:
+Input:
+- q1d: 1d flux (m/a) on elevation bands
+- boundaries: from calc_boundaries
+- u_trial: 2D velocity field which has the right shape (say cross-valley) but not the right magnitude
+- thick: ice thickness
+- ux,uy: unsmoothed velocity field (calculated as fall-line of surface DEM with get_ux_uy)
+- dx: grid size
+- mask: true where glacier is
+- bands : elevation bands
+- bandi
+- lengths: length of each elevation band
+- flux_dir_window: as used in calc_fluxdir
+- boxcarM or window_frac:
+  - pre-calculated boxcar operator
+  - window_frac: window over which to smooth as fraction of the maximum(length)
+- scale_u (ones(q1d)): if provided scale output by this much -> so make surface speeds
 
+Output:
+- ubar2d: the smoothed IV
+- ubar: the IV at the elevation-band boundaries
+- mask_ubar: true where ubar contains a value
+- facs: scaling factor in 1D
+
+Note:
 - An assumption about the distribution of the u is needed, which will
   be scaled to conform to mass conservation.  At the moment a function
   `thick[i,j].^u_exp` is used.
-
-TODO:
-- pre-calculate the boxcar filter
 """
 function calc_u(q1d, boundaries, u_trial, thick,
-                ux, uy, dx, mask, bands, lengths,
+                ux, uy, dx, mask, bands, bandi, lengths,
                 flux_dir_window, # in [m]
-                boxcarM::AbstractMatrix;
+                filter, scale_u=ones(q1d);
                 plotyes=false,
                 x=nothing, y=nothing)
-    ubar_, ubar, facs, mask_ubar = _calc_u(q1d, boundaries, u_trial, thick,
+    u, mask_u, facs = _calc_u(q1d, boundaries, u_trial, thick,
                                     ux, uy, dx, mask, bands,
                                     flux_dir_window, # in [m]
-                                           plotyes,x,y)
-    # below type assertion is needed for type-stability ?!
-    return VAWTools.apply_boxcar_matrix(boxcarM, ubar_)::Array{eltype(q1d),2}, ubar, facs, mask_ubar
+                                    plotyes, x, y, scale_u)
+    u_ = copy(u)
+    u_[isnan.(u_)] = 0  # remove NaNs to allow filtering
+
+    # type assertion is needed for type-stability
+    out::Array{eltype(q1d),2} = if filter isa AbstractMatrix
+        VAWTools.apply_boxcar_matrix(filter, u_)
+    else
+        boxcar(u_, Int((filter*maximum(lengths))÷dx)+1, mask_u, (!).(mask) )
+    end
+
+    # Make depth-averaged flow speed into a surface flow speed.
+    scale_u2d = map_back_to_2D(size(out), bandi, scale_u)
+    out = out .* scale_u2d
+
+    return out, u, mask_u, facs
 end
-function calc_u(q1d, boundaries, u_trial, thick,
-                ux, uy, dx, mask, bands, lengths,
-                flux_dir_window, # in [m]
-                window_frac;
-                plotyes=false,
-                x=nothing, y=nothing)
-    ubar_, ubar, facs, mask_ubar_ = _calc_u(q1d, boundaries, u_trial, thick,
-                                    ux, uy, dx, mask, bands,
-                                    flux_dir_window, # in [m]
-                                    plotyes,x,y)
-    return boxcar(ubar_, Int((window_frac*maximum(lengths))÷dx)+1, mask_ubar_, (!).(mask) ), ubar, facs, mask_ubar_
-end
-# this helper function is needed for type stability
+# this helper function is needed for type stability.
 function _calc_u(q1d, boundaries, u_trial, thick,
-                ux, uy, dx, mask, bands,
-                flux_dir_window,
-                plotyes,
-                x, y) # these are only needed for plotting
+                 ux, uy, dx, mask, bands,
+                 flux_dir_window,
+                 plotyes,
+                 x, y, scale_u) # these are only needed for plotting
     #plotyes && figure()
     dims = size(mask)
 
-    # this calculates the u at all elevation band boundaries:
-    ubar = zeros(dims)*NaN
-    facs = Float64[]
+    # calculate the u at all elevation band boundaries:
+    u2d = zeros(dims)*NaN
+    facs = Float64[] # scaling factor in 1D
     for (ib,bnd) in enumerate(boundaries)
         if ib<length(bands)
             # Find the receiving band, can be a number further than 1.
@@ -818,8 +922,10 @@ function _calc_u(q1d, boundaries, u_trial, thick,
             ibb==0 && error("No band below band $ib, but $ib is not bottom band!  This means that the domain is likely disjoint.")
             bb=bnd[ibb]
         else # outflow at terminus
-            # TODO: this probably needs updating where several elevation bands contribute (tide-water)
-            # -> no, only ever the last band does outflow
+            # This probably needs updating where several elevation bands contribute (tide-water)
+            # -> no, only ever the last band does outflow in our 1D model
+            #
+            # This errors at times, for example on RGI60-14.11814 (which is not sea-terminating)
             bb = get(bnd, -1, bnd[0]) # if sea-terminating use those edges.
         end
         # loop over segments
@@ -846,21 +952,20 @@ function _calc_u(q1d, boundaries, u_trial, thick,
         #@assert all(u.>=0) "$i, $ij, $(u_trial[ij]), $(ff[ij]), $(q_trial), $(q1d[i]), $(h_line[ij])"
         for (n,(i,j)) in enumerate(zip(is,js))
             if u[n]<0;
-                println("Flow speed<0: $(u[n]) at location ($i,$j).  This should not happen!")
+                println("Flow speed<0: $(u[n]) at location ($i,$j).  This should not happen!  Setting to zero.")
                 u[n]=0
             end
-            ubar[i,j] = u[n]
+            # also scale u:
+            u2d[i,j] = u[n] * scale_u[ib]
         end
     end
-    mask_ubar_ = mask .& ((!).(isnan.(ubar))) # location of all cells for which `ubar` was calculated
-    ubar_ = copy(ubar)
-    ubar_[isnan.(ubar_)] = 0
+    mask_u = mask .& ((!).(isnan.(u2d))) # location of all cells for which `u` was calculated
     # if plotyes
     #     # imshow(binmat',origin="lower", extent=(x[1],x[end],y[1],y[end]), cmap="flag"); colorbar();
-    #     imshow(ubar',origin="lower", extent=(x[1],x[end],y[1],y[end]),); colorbar(); clim(0,50)
+    #     imshow(u',origin="lower", extent=(x[1],x[end],y[1],y[end]),); colorbar(); clim(0,50)
     # end
 
-    return ubar_, ubar, facs, mask_ubar_
+    return u2d, mask_u, facs
 end
 
 """
@@ -870,7 +975,7 @@ Precalculate the boxcar operator for the IV calculation (this is the
 most expensive part).
 """
 function get_iv_boxcar_M(F, dem, mask, bands, bandi, lengths, iv_window_frac)
-    ux,uy = (-).(gradient3by3(dem, mask))
+    ux,uy = get_ux_uy(dem, mask)
     binmat = bins2matrix(dem, bands, bandi)
     boundaries = calc_boundaries(bands,bandi,binmat)
     q1d = ones(bands)
@@ -878,13 +983,13 @@ function get_iv_boxcar_M(F, dem, mask, bands, bandi, lengths, iv_window_frac)
     thick = u_trial
     dx = step(dem.x)
     flux_dir_window = 2
-    ubar_, ubar, facs, mask_ubar_ = _calc_u(q1d, boundaries, u_trial, thick,
-                                            ux, uy, dx, mask,
-                                            bands,
-                                            flux_dir_window,
-                                            false,nothing,nothing)
+    mask_u = _calc_u(q1d, boundaries, u_trial, thick,
+                     ux, uy, dx, mask,
+                     bands,
+                     flux_dir_window,
+                     false,nothing,nothing,ones(q1d))[2]
 
-    return boxcar_matrix(F, Int((iv_window_frac*maximum(lengths))÷dx)+1, mask_ubar_, (!).(mask)),
+    return boxcar_matrix(F, Int((iv_window_frac*maximum(lengths))÷dx)+1, mask_u, (!).(mask)),
            boundaries, ux, uy
 end
 
@@ -907,5 +1012,5 @@ function plot_bands(dem, bands, bandi; bands2plot=1:length(bands))
             binmat[i] = NaN
         end
     end
-    Main.contourf(dem.x,dem.y,binmat',aspect_ratio=:equal)
+    Main.PyPlot.contourf(dem.x,dem.y,binmat',aspect_ratio=:equal)
 end
