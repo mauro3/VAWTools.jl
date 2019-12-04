@@ -24,6 +24,6 @@ git:
 ## Documeter.jl
 after_success:
   # push coverage results to Coveralls
-  - julia -e 'using Pkg; cd(Pkg.dir("VAWTools")); Pkg.add("Coverage"); using Coverage; Coveralls.submit(Coveralls.process_folder())'
+  # - julia -e 'using Pkg; cd(Pkg.dir("VAWTools")); Pkg.add("Coverage"); using Coverage; Coveralls.submit(Coveralls.process_folder())'
   # push coverage results to Codecov
   - julia -e 'using Pkg; cd(Pkg.dir("VAWTools")); Pkg.add("Coverage"); using Coverage; Codecov.submit(Codecov.process_folder())'
