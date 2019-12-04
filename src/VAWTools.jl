@@ -152,6 +152,44 @@ end
 (*)(n::Number, g::Gridded) = Gridded(g.x, g.y, g.v*n, g.err*n, g.midpoint, g.proj)
 (*)(g::Gridded, n::Number) = n*g
 
+"""
+    fillgaps(g::Gridded, di=1, fillval=NaN)
+
+Fills gaps on a gridded array by averaging over a distance `di` (number of cells cells).
+
+Note,
+- if gridded-dataset is surrounded by fillvalues then there might be
+  odd edge effects up to `di` number of cells.
+- the test against `fillval` is done with `isequal` (to allow NaNs)
+"""
+function fillgaps(g::Gridded, di=1, fillval=NaN)
+    sz1,sz2 = size(g.v)
+    gg = deepcopy(g)
+    vv = g.v
+    @inbounds for (j,y)=enumerate(g.y), (i,x)=enumerate(g.x)
+        # fill in FILL-gaps inside the glacier:
+        if isequal(g.v[i,j], fillval)
+            val = 0.0
+            n = 0
+            for jj=max(1,j-di):min(sz2,j+di)
+                for ii=max(1,i-di):min(sz1,i+di)
+                    tmp = vv[ii,jj]
+                    if !isnan(tmp)
+                        val += tmp
+                        n+=1
+                    end
+                end
+            end
+            if n>0
+                gg.v[i,j] = val/n
+            else
+                # leave unfilled hole
+            end
+        end
+    end
+    return gg
+end
+
 
 """
 Holds 1D fields, e.g. elevation band data.
@@ -688,7 +726,10 @@ function get_utm_asciigrid(io::IO)
     return "+proj=utm +zone=$(utm) +datum=WGS84"
 end
 
-"""Write Ascii grid.
+"""
+    write_agr(g::Gridded{T_}, fn::AbstractString; T=T_, NA_g=convert(T_,NaN), NA_agr=convert(T,NaN), write_err=false) where T_
+
+Write Ascii grid.
 
 Output format is determined by the extension:
 - .bin -- binary
@@ -781,10 +822,14 @@ function write_agr(g::AGR{T_}, fn::AbstractString; NA=nothing, T=T_) where T_
 end
 
 """
-Read .xyn files which can contain several, joined polygons.
+Read .xyn or .xyzn files which can contain several, joined polygons.
 
 x              y           label
 -2031744.122   833011.310  21
+...
+
+x              y           z   label
+-2031744.122   833011.310  23.4  21
 ...
 
 where the label marks the beginning or end of line (21 --start, 22 --
@@ -877,6 +922,38 @@ function read_xyn(fn; hasz=false, fix=false)
         end
     end
     return out
+end
+function read_xyz(fn)
+    if !isfile(fn)
+        error("File $fn cannot be found.")
+    end
+    x,y,z = open(fn, "r") do io
+        x = Float64[]
+        y = Float64[]
+        z = Float64[]
+        for ls in readlines(io)
+            x_,y_,z_ = split(ls)
+            push!(x, parse(Float64, x_))
+            push!(y, parse(Float64, y_))
+            push!(z, parse(Float64, z_))
+        end
+        return x,y,z
+    end
+    # # turn into grid
+    tmp = diff(x)
+    dx = median(tmp[tmp.>0])
+    tmp = diff(y)
+    dy = median(tmp[tmp.>0])
+    xrange = extrema(x)
+    yrange = extrema(y)
+    xx = xrange[1]:dx:xrange[2]
+    yy = yrange[1]:dy:yrange[2]
+    zz = zeros(length(xx), length(yy)).*NaN
+    for (X,Y,Z) in zip(x,y,z)
+        i,j = findfirst(isequal(X), xx), findfirst(isequal(Y), yy)
+        zz[i,j] = Z
+    end
+    return Gridded(xx,yy,zz)
 end
 
 """

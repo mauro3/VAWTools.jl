@@ -239,7 +239,7 @@ function bin_grid(v::Matrix, binsize::Number, mask=BitArray([]);
     end
     return _bin_grid_kernel(bins, nv, v, ginds, min_bin_number_ends)
 end
-function bin_grid(v::Matrix, bins::Range, mask=BitArray([]); min_bin_number_ends=0, kw...)
+function bin_grid(v::Matrix, bins::AbstractRange, mask=BitArray([]); min_bin_number_ends=0, kw...)
     if isempty(mask)
         v = v
         ginds = 1:length(v)
@@ -760,7 +760,7 @@ Input:
 - ux,uy: unsmoothed velocity field (calculated as fall-line of surface DEM with get_ux_uy)
 - window : length of smoothing window (along band) in number of edges
 - dx : grid spacing
-- bands::Range : the elevation bands
+- bands::AbstractRange : the elevation bands
 
 Output:
 - flux : the flux
